@@ -1,13 +1,14 @@
 """
-FastAPI 服务器 —— Web 漏洞审查 Agent (v0.3)。
+FastAPI 服务器 —— Web 漏洞审查 Agent (v0.4)。
 
-v0.3: 底层切换到 LangGraph，FastAPI 层保持不变。
+v0.4: 前端页面
+  - / 直接返回聊天页面，无需额外终端
   - WS 连接内复用同一個 Agent 实例
   - 流式输出通过 LangGraph astream_events 逐 token 推送
-  - REST: /api/config /api/sessions /api/health
 
 用法:
     python server/web_server.py
+    浏览器打开 http://127.0.0.1:9120
 """
 
 import json
@@ -24,13 +25,13 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 
 from agent import Agent, AgentConfig
 
 # ─── FastAPI 应用 ──────────────────────────────────────
 
-app = FastAPI(title="Web Security Scanner", version="0.3.0")
+app = FastAPI(title="Web Security Scanner", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -118,6 +119,14 @@ async def chat(ws: WebSocket):
         active_sessions -= 1
 
 
+# ─── 前端页面 ─────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    html_path = PROJECT_ROOT / "web" / "index.html"
+    return html_path.read_text(encoding="utf-8")
+
+
 # ─── 健康检查 ─────────────────────────────────────────
 
 @app.get("/api/health")
@@ -138,12 +147,8 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "9120"))
 
-    print(f"🔍 Web 漏洞审查 Agent v0.3 (LangGraph): http://{host}:{port}")
-    print(f"   WebSocket: ws://{host}:{port}/api/chat")
-    print(f"   配置:      http://{host}:{port}/api/config")
-    print(f"   健康检查:   http://{host}:{port}/api/health")
-    print()
-    print("   输入网站 URL 开始扫描, 例如:")
-    print('   {"content": "扫描 http://testphp.vulnweb.com 的安全漏洞"}')
+    print(f"🔍 Web 漏洞审查 Agent v0.4: http://{host}:{port}")
+    print(f"   浏览器打开上面的地址即可使用")
+    print(f"   API: /api/health | /api/config | /api/sessions")
 
     uvicorn.run(app, host=host, port=port, log_level="info")

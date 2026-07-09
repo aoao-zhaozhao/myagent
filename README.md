@@ -10,10 +10,12 @@ my-agent/
 ├── requirements.txt      # Python 依赖
 ├── agent/
 │   ├── __init__.py
-│   └── core.py           # Agent 核心（LangGraph 引擎 + 5 个扫描工具）
+│   └── core.py           # Agent 核心（LangGraph + 8 个扫描工具）
 ├── server/
-│   └── web_server.py     # FastAPI 服务器（WebSocket + REST）
-└── test_client.py        # 命令行交互客户端
+│   └── web_server.py     # FastAPI 服务器（WebSocket + REST + 前端页面）
+├── web/
+│   └── index.html        # 浏览器聊天页面
+└── test_client.py        # 命令行交互客户端（可选）
 ```
 
 ## 快速开始
@@ -53,23 +55,20 @@ python server/web_server.py
 
 ### 4. 开始扫描
 
-另开终端：
-
-```bash
-python test_client.py
-```
-
-输入要扫描的 URL：
+浏览器打开 **http://127.0.0.1:9120**，在输入框输入 URL：
 
 ```
-🔍 你: 扫描 http://testphp.vulnweb.com 的安全漏洞
+http://49.232.142.230:13403
 ```
 
 Agent 会自动：
-1. 访问页面 → 提取表单和链接
-2. 对每个输入点注入 XSS/SQLi payload
-3. 分析安全响应头
-4. 输出漏洞报告（类型 + 风险等级 + 证据 + 修复建议）
+1. crawl 爬取所有同域页面 + 探测敏感路径
+2. sitemap 分类统计攻击面
+3. batch_scan 批量检查安全头
+4. 深入每个输入点注入 XSS/SQLi payload
+5. 输出完整安全审计报告（类型 + 风险等级 + 证据 + 修复建议）
+
+也支持命令行模式：`python test_client.py`
 
 ## API 接口
 
@@ -89,6 +88,9 @@ Agent 会自动：
 | `analyze_headers(url)` | 检查安全头（CSP/HSTS/X-Frame-Options 等） |
 | `extract_forms(url)` | 提取页面所有表单和输入参数 |
 | `extract_links(url)` | 提取页面内链，扩展攻击面 |
+| `crawl(url, depth, pages)` | BFS 爬虫，自动发现所有同域页面 + 16 个敏感路径探测 |
+| `sitemap(url)` | 攻击面分类统计（登录页/表单/API/管理后台/静态资源） |
+| `batch_scan(url)` | 批量扫描所有页面安全头 + 整体安全评级 |
 
 ## 架构
 
@@ -135,3 +137,9 @@ Agent 会自动：
 | LLM 调用 | `AsyncOpenAI` 裸调 | `ChatOpenAI` |
 | 流式输出 | 自己拼 delta | `astream_events(version="v2")` |
 | 后续扩展 RAG | 需大改 | `create_retrieval_chain` 直接接 |
+
+### v0.4 — 深度爬取 + Web 前端
+- **3 个新工具**: `crawl`（BFS 爬虫 + 敏感路径探测）、`sitemap`（攻击面分类）、`batch_scan`（批量安全头检查）
+- **Web 前端**: `web/index.html` — 浏览器直接对话，流式显示，不需要双终端
+- **System Prompt**: 两步工作流（先爬取测绘攻击面 → 再深度扫描漏洞）
+- FastAPI 新增 `/` 路由返回前端页面

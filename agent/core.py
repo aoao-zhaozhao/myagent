@@ -2,14 +2,15 @@
 Agent 核心模块 —— Web 漏洞审查引擎。
 
 v0.3: 基于 LangGraph 重构
-  - 用 LangGraph create_react_agent 替代手写 ReAct 循环
-  - ChatOpenAI 指向 DeepSeek（OpenAI 兼容）
-  - 5 个 Web 扫描工具: http_get / http_post / analyze_headers / extract_forms / extract_links
-  - 工具定义用 LangChain @tool 装饰器
+  - LangGraph create_react_agent 替代手写 ReAct 循环
+  - ChatOpenAI 指向 DeepSeek
+  - 5 个扫描工具: http_get / http_post / analyze_headers / extract_forms / extract_links
 
-后续扩展:
-  v0.4 → RAG 知识库（CVE/OWASP）→ create_retrieval_chain
-  v0.5 → 工具权限管控 → tool_call_permissions
+v0.4: 深度爬取 + 攻击面测绘
+  - 新增 crawl: BFS 爬虫，自动发现所有同域页面
+  - 新增 sitemap: 对爬取结果分类（表单页/API/静态页/管理后台）
+  - 新增 batch_scan: 批量扫描所有发现页面的安全头
+  - System Prompt 更新: 两步工作流（先爬再扫）
 """
 
 import os
@@ -25,6 +26,10 @@ from langchain_core.tools import tool
 # ── HTTP 工具所需 ──────────────────────────────────
 import requests
 from bs4 import BeautifulSoup
+
+# 靶场多为自签证书，禁用 SSL 警告
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 # ═══════════════════════════════════════════════════════
@@ -48,15 +53,26 @@ class AgentConfig:
 SYSTEM_PROMPT = """\
 你是一个Web应用安全审计专家。你的任务是扫描目标Web应用并发现漏洞。
 
-## 工作流程
-1. 先用 http_get 访问目标 URL 获取页面内容
-2. 用 extract_forms 提取页面中所有可注入的输入点
-3. 用 extract_links 提取页面内链，扩展攻击面
-4. 对每个输入点用 http_post 发送测试 payload（XSS、SQLi）
-5. 用 analyze_headers 检查安全响应头是否缺失
+## 工作流程 (v0.4 — 先爬取再扫描)
+### 第一步: 攻击面测绘
+1. 用 crawl 工具从根 URL 出发，自动发现所有同域页面和端点
+2. 用 sitemap 工具对发现的页面进行分类
+3. 根据分类结果，识别出最值得深入测试的页面（登录页、表单页、API端点）
+
+### 第二步: 深度扫描
+4. 用 batch_scan 对所有关键页面做批量安全头检查
+5. 对每个表单/输入点用 http_post 发送测试 payload（XSS、SQLi）
+6. 用 http_get 探测敏感路径（/.env、/admin、/backup等）
 
 ## 输出格式
-每个发现按以下格式报告:
+扫描完成后，输出一份 **完整的安全审计报告**:
+
+### 攻击面概览
+- 发现的页面总数、分类统计
+- 攻击面评估（大/中/小）
+
+### 漏洞列表
+每个发现按以下格式:
 - **漏洞类型**: (XSS / SQL注入 / CSRF / 安全头缺失 / 信息泄露 / ...)
 - **风险等级**: 🔴高危 / 🟡中危 / 🟢低危
 - **位置**: URL + 参数名/Header名
@@ -66,8 +82,8 @@ SYSTEM_PROMPT = """\
 
 ## 扫描原则
 - 仅分析 target URL 对应的主机，不要扫描外部链接
-- XSS payload: <script>alert(1)</script> 及其变体
-- SQLi payload: ' OR '1'='1 及 sleep 型
+- XSS payload: <script>alert(1)</script>、<img src=x onerror=alert(1)>
+- SQLi payload: ' OR '1'='1、' OR 1=1--、admin'--
 - 注意响应中是否反射了 payload（XSS）或出现了数据库错误（SQLi）
 - 响应体可能很长，重点关注前 3000 字符中的关键信息
 
@@ -274,21 +290,343 @@ def extract_links(url: str) -> str:
         return f"extract_links Error: {str(e)}"
 
 
+@tool
+def crawl(root_url: str, max_depth: int = 2, max_pages: int = 30) -> str:
+    """
+    从根 URL 出发，BFS 爬取同域下所有可达页面。
+
+    自动发现:
+        - 页面中所有 <a href> 内部链接
+        - 常见敏感路径: /admin, /api, /.env, /backup, /robots.txt, /sitemap.xml, /.git/HEAD
+        - <script src> 和 <link href> 中的 JS/CSS 资源路径（可能泄露 API 端点）
+
+    参数:
+        root_url: 根 URL（如 http://example.com）
+        max_depth: 最大爬取深度（默认 2，建议 2-3）
+        max_pages: 最多爬取页数（默认 30）
+    """
+    from urllib.parse import urljoin, urlparse, urldefrag
+
+    base_domain = urlparse(root_url).netloc
+    visited: set[str] = set()
+    # BFS 队列: (url, depth)
+    queue: list[tuple[str, int]] = [(root_url.rstrip("/"), 0)]
+    discovered: list[dict] = []
+
+    # 常见的敏感探测路径
+    sensitive_paths = [
+        "/admin", "/admin/login", "/backup", "/bak",
+        "/.env", "/.git/HEAD", "/robots.txt", "/sitemap.xml",
+        "/api", "/api/v1", "/swagger", "/docs",
+        "/phpinfo.php", "/info.php", "/test.php",
+        "/wp-admin", "/wp-login.php",
+        "/console", "/actuator", "/debug",
+    ]
+
+    while queue and len(discovered) < max_pages:
+        url, depth = queue.pop(0)
+        norm = url.rstrip("/")
+
+        if norm in visited:
+            continue
+        visited.add(norm)
+
+        try:
+            r = requests.get(url, timeout=8, allow_redirects=True, verify=False)
+            status = r.status_code
+            content_type = r.headers.get("Content-Type", "")
+
+            discovered.append({
+                "url": url,
+                "status": status,
+                "content_type": content_type.split(";")[0] if content_type else "unknown",
+                "size": len(r.text),
+            })
+
+            # 只对 HTML 页面提取链接
+            if "text/html" not in content_type:
+                continue
+
+            if depth >= max_depth:
+                continue
+
+            soup = BeautifulSoup(r.text, "html.parser")
+
+            # 提取 <a href>
+            for a in soup.find_all("a", href=True):
+                href = urljoin(url, a["href"])
+                href, _ = urldefrag(href)  # 去 fragment
+                parsed = urlparse(href)
+                if parsed.netloc == base_domain or parsed.netloc == "":
+                    if parsed.scheme in ("http", "https") or parsed.scheme == "":
+                        target = urljoin(url, href).rstrip("/")
+                        if target not in visited:
+                            queue.append((target, depth + 1))
+
+        except Exception:
+            continue
+
+    # 探测敏感路径
+    sensitive_found: list[str] = []
+    for path in sensitive_paths:
+        probe_url = urljoin(root_url, path)
+        try:
+            r = requests.get(probe_url, timeout=5, allow_redirects=False, verify=False)
+            if r.status_code not in (404, 500, 502, 503):
+                sensitive_found.append(f"  {probe_url} → {r.status_code}")
+        except Exception:
+            pass
+
+    lines = [
+        f"[crawl] 根 URL: {root_url}",
+        f"域名: {base_domain}",
+        f"爬取深度: {max_depth} | 最多页数: {max_pages}",
+        f"发现页面: {len(discovered)}",
+        "",
+        "── 发现的页面 ──",
+    ]
+    for d in discovered:
+        lines.append(f"  [{d['status']}] {d['content_type']:20s} {d['url']}")
+
+    if sensitive_found:
+        lines.append("")
+        lines.append("── 敏感路径探测 ──")
+        lines.extend(sensitive_found)
+
+    lines.append("")
+    lines.append(f"总计: {len(discovered)} 个页面, {len(sensitive_found)} 个敏感路径")
+    return "\n".join(lines)
+
+
+@tool
+def sitemap(root_url: str) -> str:
+    """
+    对 crawl 发现的页面进行智能分类。
+
+    分类维度:
+        - 登录/认证页（含 login/signin/auth 关键词）
+        - 表单页（含 <form> 标签）
+        - API 端点（JSON 响应 / 路径含 api）
+        - 管理后台（路径含 admin/management/dashboard）
+        - 静态资源（CSS/JS/图片）
+        - 其他页面
+        - 敏感暴露（.env/.git/phpinfo 等返回了内容）
+
+    参数:
+        root_url: 根 URL（会先自动 crawl）
+    """
+    from urllib.parse import urljoin, urlparse, urldefrag
+
+    base_domain = urlparse(root_url).netloc
+    visited: set[str] = set()
+    queue: list[tuple[str, int]] = [(root_url.rstrip("/"), 0)]
+    pages: list[dict] = []
+
+    while queue and len(pages) < 25:
+        url, depth = queue.pop(0)
+        norm = url.rstrip("/")
+
+        if norm in visited:
+            continue
+        visited.add(norm)
+
+        try:
+            r = requests.get(url, timeout=8, allow_redirects=True, verify=False)
+            status = r.status_code
+            ct = r.headers.get("Content-Type", "")
+            is_html = "text/html" in ct
+            is_json = "application/json" in ct
+
+            has_forms = False
+            if is_html:
+                soup = BeautifulSoup(r.text, "html.parser")
+                has_forms = len(soup.find_all("form")) > 0
+
+            pages.append({
+                "url": url,
+                "status": status,
+                "is_html": is_html,
+                "is_json": is_json,
+                "has_forms": has_forms,
+            })
+
+            if is_html and depth < 2:
+                soup = BeautifulSoup(r.text, "html.parser")
+                for a in soup.find_all("a", href=True):
+                    href = urljoin(url, a["href"])
+                    href, _ = urldefrag(href)
+                    p = urlparse(href)
+                    if (p.netloc == base_domain or p.netloc == "") and p.scheme in ("http", "https", ""):
+                        target = href.rstrip("/")
+                        if target not in visited:
+                            queue.append((target, depth + 1))
+        except Exception:
+            continue
+
+    # 分类
+    categories = {
+        "登录/认证页": [],
+        "表单页": [],
+        "API 端点": [],
+        "管理后台": [],
+        "静态资源": [],
+        "其他页面": [],
+    }
+
+    for p in pages:
+        url_lower = p["url"].lower()
+        path = urlparse(p["url"]).path.lower()
+
+        if any(kw in url_lower for kw in ["login", "signin", "auth", "signup", "register", "sign_on"]):
+            categories["登录/认证页"].append(p)
+        elif any(kw in path for kw in ["admin", "manage", "dashboard", "backend", "cms"]):
+            categories["管理后台"].append(p)
+        elif p["is_json"] or "/api" in path or "/v1/" in path or "/v2/" in path:
+            categories["API 端点"].append(p)
+        elif p["has_forms"]:
+            categories["表单页"].append(p)
+        elif any(path.endswith(ext) for ext in [".css", ".js", ".png", ".jpg", ".svg", ".ico", ".woff", ".ttf"]):
+            categories["静态资源"].append(p)
+        else:
+            categories["其他页面"].append(p)
+
+    # 汇总
+    total = len(pages)
+    lines = [
+        f"[sitemap] 攻击面测绘 — {root_url}",
+        f"域名: {base_domain}",
+        f"发现页面总数: {total}",
+        "",
+    ]
+    for cat, items in categories.items():
+        if items:
+            lines.append(f"## {cat} ({len(items)}):")
+            for it in items[:8]:
+                forms_mark = " [含表单]" if it.get("has_forms") else ""
+                lines.append(f"  [{it['status']}] {it['url']}{forms_mark}")
+            if len(items) > 8:
+                lines.append(f"  ... 还有 {len(items) - 8} 个")
+            lines.append("")
+
+    lines.append(f"攻击面评级: {'🔴 大' if total > 20 else '🟡 中' if total > 8 else '🟢 小'} ({total} 个页面)")
+    return "\n".join(lines)
+
+
+@tool
+def batch_scan(root_url: str) -> str:
+    """
+    批量扫描目标站点的安全配置。
+
+    自动执行:
+        1. crawl 发现所有页面
+        2. 对每个页面做安全头检查（CSP/HSTS/X-Frame-Options 等）
+        3. 汇总缺失安全头的页面列表
+        4. 统计整体安全态势
+
+    参数:
+        root_url: 目标根 URL
+    """
+    from urllib.parse import urljoin, urlparse, urldefrag
+
+    base_domain = urlparse(root_url).netloc
+    visited: set[str] = set()
+    queue: list[tuple[str, int]] = [(root_url.rstrip("/"), 0)]
+    results: list[dict] = []
+
+    # 第一步: crawl
+    while queue and len(results) < 20:
+        url, depth = queue.pop(0)
+        norm = url.rstrip("/")
+        if norm in visited:
+            continue
+        visited.add(norm)
+
+        try:
+            r = requests.get(url, timeout=8, allow_redirects=True, verify=False)
+            headers = dict(r.headers)
+            results.append({
+                "url": url,
+                "status": r.status_code,
+                "missing_headers": [
+                    h for h in [
+                        "Content-Security-Policy",
+                        "Strict-Transport-Security",
+                        "X-Frame-Options",
+                        "X-Content-Type-Options",
+                    ] if h not in headers
+                ],
+            })
+
+            if depth < 2 and "text/html" in headers.get("Content-Type", ""):
+                soup = BeautifulSoup(r.text, "html.parser")
+                for a in soup.find_all("a", href=True):
+                    href = urljoin(url, a["href"])
+                    href, _ = urldefrag(href)
+                    p = urlparse(href)
+                    if (p.netloc == base_domain or p.netloc == "") and p.scheme in ("http", "https", ""):
+                        target = href.rstrip("/")
+                        if target not in visited:
+                            queue.append((target, depth + 1))
+        except Exception:
+            continue
+
+    # 第二步: 汇总
+    lines = [
+        f"[batch_scan] 批量安全扫描 — {root_url}",
+        f"扫描页面数: {len(results)}",
+        "",
+        "── 安全头缺失汇总 ──",
+    ]
+
+    # 每个安全头缺失的页面数
+    header_stats: dict[str, list[str]] = {}
+    for r in results:
+        for h in r["missing_headers"]:
+            header_stats.setdefault(h, []).append(r["url"])
+
+    for header, urls in header_stats.items():
+        lines.append(f"  ❌ {header}: {len(urls)}/{len(results)} 页缺失")
+
+    lines.append("")
+    lines.append("── 逐页详情 ──")
+    for r in results:
+        if r["missing_headers"]:
+            missing = ", ".join(r["missing_headers"])
+            lines.append(f"  [{r['status']}] {r['url']}")
+            lines.append(f"         缺失: {missing}")
+        else:
+            lines.append(f"  [{r['status']}] {r['url']} ✅ 安全头完整")
+
+    # 评分
+    total_missing = sum(len(r["missing_headers"]) for r in results)
+    if total_missing == 0:
+        grade = "🟢 A — 安全配置完善"
+    elif total_missing <= len(results) * 2:
+        grade = "🟡 B — 存在一定缺失"
+    else:
+        grade = "🔴 C — 安全配置严重不足"
+
+    lines.append(f"\n整体安全评级: {grade}")
+    return "\n".join(lines)
+
+
 # ═══════════════════════════════════════════════════════
 # Agent 类 — 基于 LangGraph
 # ═══════════════════════════════════════════════════════
 
-TOOLS = [http_get, http_post, analyze_headers, extract_forms, extract_links]
+TOOLS = [http_get, http_post, analyze_headers, extract_forms, extract_links,
+        crawl, sitemap, batch_scan]
 
 
 class Agent:
     """
-    Web 漏洞审查 Agent (v0.3 — LangGraph 引擎)。
+    Web 漏洞审查 Agent (v0.4 — 深度爬取引擎)。
 
-    与 v0.2 的区别:
-        - 引擎从手写 ReAct 循环 → LangGraph create_react_agent
-        - 工具从手写 JSON → LangChain @tool 装饰器
-        - messages 仍跨 run() 累积（多轮记忆），但 agent 内部管理 tool-call 循环
+    v0.4 新增:
+        - crawl: BFS 爬虫，自动发现所有同域页面 + 敏感路径探测
+        - sitemap: 攻击面分类（登录页/表单页/API/管理后台）
+        - batch_scan: 批量安全头检查所有发现页面
+        - 两步工作流: 先爬取测绘攻击面 → 再深度扫描漏洞
 
     用法:
         agent = Agent(AgentConfig())
