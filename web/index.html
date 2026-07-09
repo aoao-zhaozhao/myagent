@@ -3,287 +3,805 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Web 漏洞审查 Agent v0.6</title>
+<title>Web Security Scanner v0.7</title>
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --border: #2a2d3a;
-    --text: #e1e4eb;
-    --text-dim: #8b8fa3;
-    --accent: #4ade80;
-    --danger: #f87171;
-    --warn: #fbbf24;
-    --info: #60a5fa;
+    --bg: #111311;
+    --panel: #181b18;
+    --panel-2: #20241f;
+    --line: #343a33;
+    --text: #eef1ea;
+    --muted: #a6ada3;
+    --soft: #cfd6ca;
+    --green: #55c67a;
+    --blue: #67a8ff;
+    --amber: #e4b94f;
+    --red: #ec6a6a;
+    --purple: #b38cff;
+    --shadow: 0 18px 50px rgba(0, 0, 0, .22);
     --radius: 8px;
   }
-  * { margin:0; padding:0; box-sizing:border-box; }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
     background: var(--bg);
     color: var(--text);
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0;
+  }
+  button, input, textarea {
+    font: inherit;
+  }
+  button {
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    min-height: 38px;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  button:hover { border-color: #586052; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  code, pre {
+    font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   }
 
-  /* header */
-  header {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 12px 20px;
+  .app {
+    height: 100vh;
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+  .sidebar {
+    border-right: 1px solid var(--line);
+    background: #151714;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .brand {
+    padding: 16px;
+    border-bottom: 1px solid var(--line);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    flex-shrink: 0;
-  }
-  header h1 { font-size: 18px; font-weight: 600; }
-  header .status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--text-dim);
-  }
-  .dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--text-dim);
-  }
-  .dot.on { background: var(--accent); }
-  .dot.off { background: var(--danger); }
-
-  /* chat area */
-  #chat {
-    flex: 1;
-    overflow-y: auto;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
     gap: 12px;
   }
-  .msg {
-    max-width: 85%;
-    padding: 12px 16px;
-    border-radius: var(--radius);
-    line-height: 1.6;
-    font-size: 14px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    animation: fadeIn 0.2s ease;
+  .brand h1 {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.2;
+    font-weight: 700;
   }
-  @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
-  .msg.user {
-    align-self: flex-end;
-    background: #2563eb;
-    color: #fff;
-    border-bottom-right-radius: 2px;
-  }
-  .msg.agent {
-    align-self: flex-start;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-bottom-left-radius: 2px;
-  }
-  .msg.info {
-    align-self: center;
-    background: transparent;
-    color: var(--text-dim);
+  .version {
+    color: var(--muted);
     font-size: 12px;
-    padding: 4px 12px;
+    margin-top: 4px;
   }
-  .msg .risk-high { color: var(--danger); font-weight: 600; }
-  .msg .risk-mid { color: var(--warn); font-weight: 600; }
-  .msg .risk-low { color: var(--accent); font-weight: 600; }
-
-  /* typing indicator */
-  .typing { color: var(--text-dim); font-size: 12px; padding: 4px 16px; }
-  .typing span { animation: blink 1s infinite; }
-  .typing span:nth-child(2) { animation-delay: 0.2s; }
-  .typing span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes blink { 0%,100%{opacity:0.2} 50%{opacity:1} }
-
-  /* input area */
-  footer {
-    background: var(--surface);
-    border-top: 1px solid var(--border);
-    padding: 16px 20px;
-    flex-shrink: 0;
+  .icon-btn {
+    width: 38px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
   }
-  #input-row {
-    display: flex;
-    gap: 10px;
-  }
-  #user-input {
+  .sessions {
     flex: 1;
-    padding: 10px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--bg);
-    color: var(--text);
-    font-size: 14px;
-    outline: none;
-    resize: none;
-    font-family: inherit;
+    overflow-y: auto;
+    padding: 10px;
   }
-  #user-input:focus { border-color: var(--accent); }
-  #user-input::placeholder { color: var(--text-dim); }
-  button {
-    padding: 10px 16px;
-    border: none;
-    border-radius: var(--radius);
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    font-family: inherit;
+  .session {
+    width: 100%;
+    text-align: left;
+    padding: 10px;
+    margin-bottom: 8px;
+    background: transparent;
+  }
+  .session.active {
+    background: var(--panel-2);
+    border-color: #64705d;
+  }
+  .session-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+  .session-meta {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .side-footer {
+    border-top: 1px solid var(--line);
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+  }
+  .main {
+    min-width: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    background: linear-gradient(180deg, #171a16 0%, #111311 100%);
+  }
+  .topbar {
+    border-bottom: 1px solid var(--line);
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    background: rgba(24, 27, 24, .92);
+  }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--muted);
+    font-size: 13px;
     white-space: nowrap;
   }
-  #send-btn { background: var(--accent); color: #000; }
-  #send-btn:hover { opacity: 0.9; }
-  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  #clear-btn { background: var(--border); color: var(--text); }
-  #clear-btn:hover { opacity: 0.8; }
-
-  /* prompt hint */
-  .hint {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin-top: 8px;
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--red);
   }
+  .dot.on { background: var(--green); }
+  .steps {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    overflow-x: auto;
+  }
+  .step {
+    border: 1px solid var(--line);
+    color: var(--muted);
+    padding: 6px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .step.active {
+    color: #07120b;
+    background: var(--green);
+    border-color: var(--green);
+  }
+  .step.done {
+    color: var(--soft);
+    border-color: #4a5647;
+  }
+  .workspace {
+    min-height: 0;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+  .conversation {
+    overflow-y: auto;
+    padding: 18px;
+  }
+  .rail {
+    border-left: 1px solid var(--line);
+    background: rgba(21, 23, 20, .7);
+    overflow-y: auto;
+    padding: 14px;
+  }
+  .rail h2 {
+    font-size: 13px;
+    margin: 4px 0 10px;
+    color: var(--soft);
+  }
+  .empty {
+    color: var(--muted);
+    font-size: 13px;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    padding: 14px;
+  }
+  .message {
+    max-width: 980px;
+    margin: 0 0 14px;
+    display: flex;
+  }
+  .message.user { justify-content: flex-end; }
+  .bubble {
+    max-width: min(860px, 92%);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 13px 15px;
+    line-height: 1.6;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+    box-shadow: var(--shadow);
+  }
+  .user .bubble {
+    background: #243527;
+    border-color: #456348;
+  }
+  .assistant .bubble {
+    background: var(--panel);
+  }
+  .assistant .bubble h1,
+  .assistant .bubble h2,
+  .assistant .bubble h3 {
+    margin: 12px 0 8px;
+    font-size: 16px;
+  }
+  .assistant .bubble p { margin: 8px 0; }
+  .assistant .bubble ul { padding-left: 20px; }
+  .assistant .bubble pre {
+    overflow: auto;
+    background: #0d0f0d;
+    border: 1px solid var(--line);
+    padding: 12px;
+    border-radius: 6px;
+  }
+  .assistant .bubble code {
+    background: #0d0f0d;
+    border: 1px solid #2b312a;
+    border-radius: 4px;
+    padding: 1px 4px;
+  }
+  .tool-card {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 11px;
+    margin-bottom: 10px;
+  }
+  .tool-card.running { border-color: var(--amber); }
+  .tool-card.done { border-color: #466649; }
+  .tool-card.error { border-color: var(--red); }
+  .tool-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .tool-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .badge {
+    font-size: 11px;
+    color: #10130f;
+    background: var(--amber);
+    padding: 3px 7px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .badge.done { background: var(--green); }
+  .badge.error { background: var(--red); color: #fff; }
+  details {
+    margin-top: 9px;
+  }
+  summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .tool-body {
+    margin-top: 8px;
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    color: var(--soft);
+    font-size: 12px;
+    line-height: 1.5;
+    background: #0d0f0d;
+    border: 1px solid #2b312a;
+    border-radius: 6px;
+    padding: 9px;
+  }
+  .finding-card {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--blue);
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 10px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .finding-card.high { border-left-color: var(--red); }
+  .finding-card.medium { border-left-color: var(--amber); }
+  .finding-card.low { border-left-color: var(--green); }
+  .composer {
+    border-top: 1px solid var(--line);
+    padding: 12px 18px;
+    background: rgba(24, 27, 24, .95);
+  }
+  .input-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px 42px;
+    gap: 9px;
+  }
+  #userInput {
+    min-height: 42px;
+    max-height: 130px;
+    resize: vertical;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #0d0f0d;
+    color: var(--text);
+    padding: 11px 12px;
+    outline: none;
+  }
+  #userInput:focus { border-color: var(--green); }
+  .spin {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid rgba(255,255,255,.25);
+    border-top-color: var(--text);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* scrollbar */
-  #chat::-webkit-scrollbar { width: 6px; }
-  #chat::-webkit-scrollbar-track { background: transparent; }
-  #chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-  /* responsive */
-  @media (max-width: 600px) {
-    header h1 { font-size: 15px; }
-    .msg { max-width: 95%; font-size: 13px; }
+  @media (max-width: 980px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .workspace { grid-template-columns: 1fr; }
+    .rail { display: none; }
+    .topbar { align-items: flex-start; flex-direction: column; }
+  }
+  @media (max-width: 620px) {
+    .conversation { padding: 12px; }
+    .bubble { max-width: 100%; }
+    .steps { width: 100%; }
   }
 </style>
 </head>
 <body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div>
+        <h1>Web Security Scanner</h1>
+        <div class="version">v0.7</div>
+      </div>
+      <button class="icon-btn" id="newSessionBtn" title="新建会话">+</button>
+    </div>
+    <div class="sessions" id="sessions"></div>
+    <div class="side-footer">
+      <button id="clearHistoryBtn" title="清空本地会话">清空历史</button>
+    </div>
+  </aside>
 
-<header>
-  <h1>🔍 Web 漏洞审查 Agent v0.6</h1>
-  <div class="status">
-    <span class="dot off" id="dot"></span>
-    <span id="status-text">未连接</span>
-  </div>
-</header>
+  <main class="main">
+    <header class="topbar">
+      <div class="steps" id="steps">
+        <span class="step" data-stage="map">测绘</span>
+        <span class="step" data-stage="static">静态分析</span>
+        <span class="step" data-stage="verify">验证</span>
+        <span class="step" data-stage="knowledge">知识库</span>
+        <span class="step" data-stage="report">报告</span>
+      </div>
+      <div class="status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">未连接</span>
+      </div>
+    </header>
 
-<div id="chat">
-  <div class="msg info">输入要扫描的 URL 开始安全审计</div>
+    <section class="workspace">
+      <div class="conversation" id="conversation">
+        <div class="empty">输入目标 URL 或审计问题后开始。</div>
+      </div>
+      <aside class="rail">
+        <h2>工具轨迹</h2>
+        <div id="toolRail" class="empty">等待扫描任务。</div>
+        <h2>风险摘录</h2>
+        <div id="findingRail" class="empty">报告生成后显示。</div>
+      </aside>
+    </section>
+
+    <footer class="composer">
+      <div class="input-row">
+        <textarea id="userInput" placeholder="https://example.com"></textarea>
+        <button class="icon-btn" id="sendBtn" title="发送">▶</button>
+        <button class="icon-btn" id="clearBtn" title="清空当前会话">×</button>
+      </div>
+    </footer>
+  </main>
 </div>
 
-<footer>
-  <div id="input-row">
-    <input id="user-input" placeholder="输入目标 URL，例如 http://49.232.142.230:13403" autofocus>
-    <button id="send-btn">发送</button>
-    <button id="clear-btn">清空</button>
-  </div>
-  <div class="hint">输入 URL → Agent 自动爬取 + JS/API/SPA 分析 + 知识库验证 → 输出漏洞报告 ｜ 输入 <code>/clear</code> 清空会话 ｜ v0.6</div>
-</footer>
-
 <script>
-const WS_URL = `ws://${location.host}/api/chat`;
-let ws = null;
-let currentAgentMsg = null;
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/chat`;
+const STORAGE_KEY = 'my-agent-v07-sessions';
+const STAGES = {
+  crawl: 'map',
+  sitemap: 'map',
+  analyze_js: 'static',
+  discover_api: 'static',
+  render_page: 'static',
+  decode_jwt: 'verify',
+  test_lfi_param: 'verify',
+  http_get: 'verify',
+  http_post: 'verify',
+  batch_scan: 'verify',
+  analyze_headers: 'verify',
+  extract_forms: 'map',
+  extract_links: 'map',
+  search_knowledge: 'knowledge'
+};
 
-const chat = document.getElementById('chat');
-const input = document.getElementById('user-input');
-const sendBtn = document.getElementById('send-btn');
-const clearBtn = document.getElementById('clear-btn');
-const dot = document.getElementById('dot');
-const statusText = document.getElementById('status-text');
+let ws;
+let busy = false;
+let sessions = loadSessions();
+let activeId = sessions[0]?.id || null;
+let currentAssistant = null;
+let currentAssistantRaw = '';
+let toolCards = new Map();
+let completedStages = new Set();
 
-function addMsg(role, html) {
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
-  div.innerHTML = html;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-  return div;
+const conversation = document.getElementById('conversation');
+const sessionsEl = document.getElementById('sessions');
+const toolRail = document.getElementById('toolRail');
+const findingRail = document.getElementById('findingRail');
+const input = document.getElementById('userInput');
+const sendBtn = document.getElementById('sendBtn');
+const clearBtn = document.getElementById('clearBtn');
+const newSessionBtn = document.getElementById('newSessionBtn');
+const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+
+if (!activeId) {
+  activeId = createSession().id;
 }
 
-function setStatus(on, text) {
-  dot.className = 'dot ' + (on ? 'on' : 'off');
+function loadSessions() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSessions() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.slice(0, 30)));
+  renderSessions();
+}
+
+function createSession() {
+  const session = {
+    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+    title: '新扫描',
+    createdAt: Date.now(),
+    messages: [],
+    tools: []
+  };
+  sessions.unshift(session);
+  saveSessions();
+  return session;
+}
+
+function activeSession() {
+  let session = sessions.find(item => item.id === activeId);
+  if (!session) {
+    session = createSession();
+    activeId = session.id;
+  }
+  return session;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/```([\s\S]*?)```/g, (_, code) => `<pre><code>${code.trim()}</code></pre>`);
+  html = html.replace(/^### (.*)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.*)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.*)$/gm, '<h1>$1</h1>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/^- (.*)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+  html = html.replace(/\n{2,}/g, '</p><p>');
+  html = html.replace(/\n/g, '<br>');
+  return `<p>${html}</p>`.replaceAll('<p><h', '<h').replaceAll('</h1></p>', '</h1>').replaceAll('</h2></p>', '</h2>').replaceAll('</h3></p>', '</h3>');
+}
+
+function setStatus(connected, text) {
+  statusDot.className = `dot ${connected ? 'on' : ''}`;
   statusText.textContent = text;
+}
+
+function setBusy(next) {
+  busy = next;
+  sendBtn.disabled = next;
+  input.disabled = next;
+  sendBtn.innerHTML = next ? '<span class="spin"></span>' : '▶';
+}
+
+function addMessage(role, content, persist = true) {
+  const empty = conversation.querySelector('.empty');
+  if (empty) empty.remove();
+  const wrap = document.createElement('div');
+  wrap.className = `message ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.innerHTML = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content);
+  wrap.appendChild(bubble);
+  conversation.appendChild(wrap);
+  conversation.scrollTop = conversation.scrollHeight;
+  if (persist) {
+    activeSession().messages.push({ role, content, at: Date.now() });
+    saveSessions();
+  }
+  return bubble;
+}
+
+function renderConversation() {
+  conversation.innerHTML = '';
+  const session = activeSession();
+  if (!session.messages.length) {
+    conversation.innerHTML = '<div class="empty">输入目标 URL 或审计问题后开始。</div>';
+  } else {
+    session.messages.forEach(msg => addMessage(msg.role, msg.content, false));
+  }
+  renderToolHistory();
+  renderFindingCards(session.messages.at(-1)?.content || '');
+}
+
+function renderSessions() {
+  sessionsEl.innerHTML = '';
+  sessions.forEach(session => {
+    const btn = document.createElement('button');
+    btn.className = `session ${session.id === activeId ? 'active' : ''}`;
+    btn.innerHTML = `
+      <div class="session-title">${escapeHtml(session.title)}</div>
+      <div class="session-meta">${new Date(session.createdAt).toLocaleString()}</div>
+    `;
+    btn.onclick = () => {
+      activeId = session.id;
+      currentAssistant = null;
+      currentAssistantRaw = '';
+      toolCards.clear();
+      completedStages.clear();
+      renderSessions();
+      renderConversation();
+      updateStages();
+    };
+    sessionsEl.appendChild(btn);
+  });
+}
+
+function renderToolHistory() {
+  const tools = activeSession().tools || [];
+  toolRail.innerHTML = '';
+  toolCards.clear();
+  if (!tools.length) {
+    toolRail.className = 'empty';
+    toolRail.textContent = '等待扫描任务。';
+    return;
+  }
+  toolRail.className = '';
+  tools.forEach(tool => {
+    const card = buildToolCard(tool);
+    toolRail.appendChild(card);
+    toolCards.set(tool.id, card);
+  });
+}
+
+function buildToolCard(tool) {
+  const state = tool.output ? 'done' : 'running';
+  const card = document.createElement('div');
+  card.className = `tool-card ${state}`;
+  card.dataset.id = tool.id;
+  card.innerHTML = `
+    <div class="tool-head">
+      <div class="tool-name">${escapeHtml(tool.name)}</div>
+      <span class="badge ${state === 'done' ? 'done' : ''}">${state === 'done' ? '完成' : '执行中'}</span>
+    </div>
+    <details>
+      <summary>参数</summary>
+      <div class="tool-body">${escapeHtml(formatPayload(tool.input))}</div>
+    </details>
+    ${tool.output ? `<details open><summary>结果摘要</summary><div class="tool-body">${escapeHtml(tool.output)}</div></details>` : ''}
+  `;
+  return card;
+}
+
+function formatPayload(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function onToolStart(msg) {
+  if (toolRail.classList.contains('empty')) {
+    toolRail.className = '';
+    toolRail.innerHTML = '';
+  }
+  const tool = { id: msg.id || `${msg.name}-${Date.now()}`, name: msg.name, input: msg.input, output: '' };
+  activeSession().tools.push(tool);
+  saveSessions();
+  const card = buildToolCard(tool);
+  toolRail.prepend(card);
+  toolCards.set(tool.id, card);
+  markStageForTool(tool.name);
+}
+
+function onToolEnd(msg) {
+  const id = msg.id;
+  const sessionTool = activeSession().tools.find(tool => tool.id === id);
+  if (sessionTool) {
+    sessionTool.output = msg.output || '';
+    saveSessions();
+  }
+  const card = toolCards.get(id);
+  if (card) {
+    card.className = 'tool-card done';
+    const badge = card.querySelector('.badge');
+    if (badge) {
+      badge.className = 'badge done';
+      badge.textContent = '完成';
+    }
+    if (!card.querySelector('.result-details')) {
+      const details = document.createElement('details');
+      details.className = 'result-details';
+      details.open = true;
+      details.innerHTML = `<summary>结果摘要</summary><div class="tool-body">${escapeHtml(msg.output || '')}</div>`;
+      card.appendChild(details);
+    }
+  }
+  markStageForTool(msg.name);
+}
+
+function markStageForTool(toolName) {
+  const stage = STAGES[toolName] || 'verify';
+  completedStages.add(stage);
+  updateStages(stage);
+}
+
+function updateStages(activeStage = null) {
+  document.querySelectorAll('.step').forEach(step => {
+    const stage = step.dataset.stage;
+    step.className = 'step';
+    if (completedStages.has(stage)) step.classList.add('done');
+    if (stage === activeStage) step.classList.add('active');
+  });
+}
+
+function renderFindingCards(text) {
+  findingRail.innerHTML = '';
+  const source = text || '';
+  const lines = source.split(/\n/).filter(line => /高危|中危|低危|LFI|文件包含|SQL|XSS|JWT|信息泄露|安全头/.test(line));
+  if (!lines.length) {
+    findingRail.className = 'empty';
+    findingRail.textContent = '报告生成后显示。';
+    return;
+  }
+  findingRail.className = '';
+  lines.slice(0, 8).forEach(line => {
+    const card = document.createElement('div');
+    const level = /高危|严重/.test(line) ? 'high' : /中危/.test(line) ? 'medium' : /低危/.test(line) ? 'low' : '';
+    card.className = `finding-card ${level}`;
+    card.textContent = line.replace(/^[-*\s]+/, '').trim();
+    findingRail.appendChild(card);
+  });
 }
 
 function connect() {
   ws = new WebSocket(WS_URL);
   ws.onopen = () => setStatus(true, '已连接');
   ws.onclose = () => {
-    setStatus(false, '断开 — 5秒后重连');
-    setTimeout(connect, 5000);
+    setStatus(false, '断开，重连中');
+    setBusy(false);
+    setTimeout(connect, 2500);
   };
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
+  ws.onerror = () => setStatus(false, '连接错误');
+  ws.onmessage = event => {
+    const msg = JSON.parse(event.data);
     if (msg.type === 'token') {
-      if (!currentAgentMsg) {
-        currentAgentMsg = addMsg('agent', '');
+      if (!currentAssistant) {
+        currentAssistantRaw = '';
+        currentAssistant = addMessage('assistant', '', false);
       }
-      // 简单 markdown 渲染: **粗体** + `code` + 换行 → <br>
-      let html = msg.content
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/🔴/g, '<span class="risk-high">🔴</span>')
-        .replace(/🟡/g, '<span class="risk-mid">🟡</span>')
-        .replace(/🟢/g, '<span class="risk-low">🟢</span>')
-        .replace(/\n/g, '<br>');
-      currentAgentMsg.innerHTML += html;
-      chat.scrollTop = chat.scrollHeight;
+      currentAssistantRaw += msg.content || '';
+      currentAssistant.innerHTML = renderMarkdown(currentAssistantRaw);
+      conversation.scrollTop = conversation.scrollHeight;
+    } else if (msg.type === 'tool_start') {
+      onToolStart(msg);
+    } else if (msg.type === 'tool_end') {
+      onToolEnd(msg);
     } else if (msg.type === 'done') {
-      currentAgentMsg = null;
-      sendBtn.disabled = false;
-      input.disabled = false;
+      if (currentAssistantRaw) {
+        activeSession().messages.push({ role: 'assistant', content: currentAssistantRaw, at: Date.now() });
+        renderFindingCards(currentAssistantRaw);
+      }
+      completedStages.add('report');
+      updateStages('report');
+      currentAssistant = null;
+      currentAssistantRaw = '';
+      setBusy(false);
+      saveSessions();
       input.focus();
     } else if (msg.type === 'info') {
-      addMsg('info', msg.content);
+      addMessage('assistant', msg.content || '');
     } else if (msg.type === 'error') {
-      addMsg('info', '❌ ' + msg.content);
-      currentAgentMsg = null;
-      sendBtn.disabled = false;
-      input.disabled = false;
+      addMessage('assistant', `错误：${msg.content || 'unknown error'}`);
+      setBusy(false);
     }
   };
 }
 
 function send() {
   const text = input.value.trim();
-  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-
-  if (text === '/clear') {
-    ws.send(JSON.stringify({ command: 'clear' }));
-    addMsg('info', '🧹 会话已清空');
-    chat.innerHTML = '<div class="msg info">会话已清空，输入 URL 开始新扫描</div>';
-    input.value = '';
-    input.focus();
-    return;
+  if (!text || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const session = activeSession();
+  if (session.title === '新扫描') {
+    session.title = text.length > 42 ? `${text.slice(0, 42)}...` : text;
   }
-
-  addMsg('user', text.replace(/&/g,'&amp;').replace(/</g,'&lt;'));
-  currentAgentMsg = null;
-  sendBtn.disabled = true;
-  input.disabled = true;
+  addMessage('user', text);
   input.value = '';
+  currentAssistant = null;
+  currentAssistantRaw = '';
+  completedStages.clear();
+  updateStages();
+  setBusy(true);
   ws.send(JSON.stringify({ content: text }));
 }
 
-input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-});
-sendBtn.addEventListener('click', send);
-clearBtn.addEventListener('click', () => {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ command: 'clear' }));
-    chat.innerHTML = '<div class="msg info">会话已清空，输入 URL 开始新扫描</div>';
+sendBtn.onclick = send;
+input.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    send();
   }
 });
+clearBtn.onclick = () => {
+  activeSession().messages = [];
+  activeSession().tools = [];
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ command: 'clear' }));
+  }
+  currentAssistant = null;
+  currentAssistantRaw = '';
+  toolCards.clear();
+  completedStages.clear();
+  saveSessions();
+  renderConversation();
+  updateStages();
+};
+newSessionBtn.onclick = () => {
+  const session = createSession();
+  activeId = session.id;
+  currentAssistant = null;
+  currentAssistantRaw = '';
+  toolCards.clear();
+  completedStages.clear();
+  saveSessions();
+  renderConversation();
+  updateStages();
+  input.focus();
+};
+clearHistoryBtn.onclick = () => {
+  sessions = [];
+  activeId = createSession().id;
+  renderConversation();
+  updateStages();
+};
 
+renderSessions();
+renderConversation();
 connect();
 input.focus();
 </script>

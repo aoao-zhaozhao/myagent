@@ -1,68 +1,31 @@
 """
-Agent 核心引擎 — 基于 LangGraph 的 Web 漏洞审查 Agent (v0.6)。
+LangGraph-based Web security scanning agent.
 
-v0.6 变更:
-  - 新增 JS 静态分析 / API 发现 / JWT 解码 / Playwright 渲染工具
-  - 统一扫描边界、请求超时、限速和重试
-
-v0.5 变更:
-  - 从 core.py 拆分，Module-based 架构
-  - 集成 RAG 知识库 (search_knowledge 工具)
-  - System Prompt 要求先查知识库再下结论
-  - 配置项独立到 config.py
-
-用法:
-    from agent import Agent, AgentConfig
-    agent = Agent(AgentConfig())
-    async for token in agent.run("扫描 http://testphp.vulnweb.com"):
-        print(token, end="")
+v0.7 bundles:
+  - LFI verification tool: test_lfi_param
+  - Structured streaming events for the browser UI
+  - Existing v0.6 JS/API/JWT/SPA/RAG scanning flow
 """
 
-from typing import AsyncIterator
+from __future__ import annotations
 
-# ── LangChain / LangGraph ─────────────────────────────
+from typing import Any, AsyncIterator
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
-# ── Agent 子模块 ──────────────────────────────────────
 from .config import AgentConfig
 from .prompts import SYSTEM_PROMPT
-from .tools import BASE_TOOLS
 from .rag import create_search_knowledge_tool
+from .tools import BASE_TOOLS
 
 
 class Agent:
-    """
-    Web 漏洞审查 Agent (v0.6 — 静态分析 + 浏览器渲染)。
-
-    v0.6 新增:
-        - analyze_js: 扫描 JS 中的密钥、JWT、API 路径和 sourcemap
-        - discover_api: 探测 OpenAPI / Swagger / GraphQL / API 入口
-        - decode_jwt: 解码 JWT 并审计安全配置
-        - render_page: 使用 Playwright 渲染 SPA 页面
-
-    v0.5 新增:
-        - search_knowledge: 语义检索知识库，匹配 CVE/CVSS/修复方案
-        - System Prompt 要求先查知识库再下结论
-        - 模块化架构: config.py / prompts.py / tools/ / rag.py
-
-    v0.4 能力:
-        - crawl: BFS 爬虫，自动发现所有同域页面 + 敏感路径探测
-        - sitemap: 攻击面分类（登录页/表单页/API/管理后台）
-        - batch_scan: 批量安全头检查所有发现页面
-        - 两步工作流: 先爬取测绘攻击面 → 再深度扫描漏洞
-
-    用法:
-        agent = Agent(AgentConfig())
-        async for token in agent.run("扫描 http://testphp.vulnweb.com"):
-            print(token, end="")
-    """
+    """Web application security scanning agent."""
 
     def __init__(self, config: AgentConfig | None = None):
         self.config = config or AgentConfig()
-
-        # ── LLM ───────────────────────────────────
         self.llm = ChatOpenAI(
             api_key=self.config.api_key,
             base_url=self.config.base_url,
@@ -70,51 +33,58 @@ class Agent:
             temperature=self.config.temperature,
         )
 
-        # ── RAG 知识库 ───────────────────────────
         self._search_knowledge_tool = None
         self._rag_manager = None
         self._init_rag()
 
-        # ── LangGraph agent ───────────────────────
-        tools = BASE_TOOLS + [self._search_knowledge_tool]
-        self.agent = create_react_agent(self.llm, tools)
+        self.agent = create_react_agent(self.llm, self._tools())
         self.messages = [SystemMessage(content=SYSTEM_PROMPT)]
 
-    def _init_rag(self):
-        """初始化 RAG 知识库，失败时降级为无 RAG 模式。"""
+    def _tools(self):
+        tools = list(BASE_TOOLS)
+        if self._search_knowledge_tool:
+            tools.append(self._search_knowledge_tool)
+        return tools
+
+    def _init_rag(self) -> None:
+        """Initialize the RAG tool; continue without it if local models fail."""
         try:
             search_tool, rag_mgr = create_search_knowledge_tool(self.config)
             self._search_knowledge_tool = search_tool
             self._rag_manager = rag_mgr
-        except Exception as e:
-            print(f"[Agent] ⚠️ RAG 初始化失败 ({e})，降级为无知识库模式")
+        except Exception as exc:
+            print(f"[Agent] RAG init failed ({exc}); continuing without knowledge search")
             self._search_knowledge_tool = None
             self._rag_manager = None
 
     @property
     def has_rag(self) -> bool:
-        """是否成功加载 RAG 知识库。"""
         return self._rag_manager is not None and self._search_knowledge_tool is not None
 
     def clear(self) -> None:
-        """清空对话历史，只保留 system prompt。"""
         self.messages = [SystemMessage(content=SYSTEM_PROMPT)]
 
-    async def run(self, user_input: str) -> AsyncIterator[str]:
-        """
-        执行扫描，逐 token yield 模型输出。
+    def _summarize_tool_output(self, output: Any, limit: int = 900) -> str:
+        if hasattr(output, "content"):
+            text = str(output.content)
+        else:
+            text = str(output)
+        text = text.strip()
+        if len(text) > limit:
+            return text[:limit] + f"\n...[truncated {len(text) - limit} chars]"
+        return text
 
-        LangGraph 的 astream_events(version="v2") 在 on_chat_model_stream
-        事件中产出每个 token。工具调用过程由 agent 内部处理，不会
-        yield 给调用者（避免了工具参数碎片出现在输出中）。
+    async def run_events(self, user_input: str) -> AsyncIterator[dict[str, Any]]:
+        """
+        Execute one turn and yield structured events.
+
+        Event types:
+          - token: model text stream
+          - tool_start: tool name and arguments
+          - tool_end: compact tool result summary
         """
         self.messages.append(HumanMessage(content=user_input))
-
-        # 动态重建 agent（确保 search_knowledge 工具最新）
-        tools = list(BASE_TOOLS)
-        if self._search_knowledge_tool:
-            tools.append(self._search_knowledge_tool)
-        self.agent = create_react_agent(self.llm, tools)
+        self.agent = create_react_agent(self.llm, self._tools())
 
         full_response: list[str] = []
 
@@ -129,11 +99,30 @@ class Agent:
                 chunk = event["data"]["chunk"]
                 if chunk.content:
                     full_response.append(chunk.content)
-                    yield chunk.content
+                    yield {"type": "token", "content": chunk.content}
+            elif kind == "on_tool_start":
+                yield {
+                    "type": "tool_start",
+                    "id": event.get("run_id"),
+                    "name": event.get("name", "tool"),
+                    "input": event.get("data", {}).get("input"),
+                }
+            elif kind == "on_tool_end":
+                yield {
+                    "type": "tool_end",
+                    "id": event.get("run_id"),
+                    "name": event.get("name", "tool"),
+                    "output": self._summarize_tool_output(event.get("data", {}).get("output")),
+                }
 
-        # 将本轮回复写入历史
         response_text = "".join(full_response).strip()
         if response_text:
             self.messages.append(AIMessage(content=response_text))
         else:
-            self.messages.append(AIMessage(content="扫描完成，请查看上方工具调用结果。"))
+            self.messages.append(AIMessage(content="扫描完成，请查看工具调用结果。"))
+
+    async def run(self, user_input: str) -> AsyncIterator[str]:
+        """Backward-compatible token-only stream."""
+        async for event in self.run_events(user_input):
+            if event.get("type") == "token":
+                yield str(event.get("content", ""))
