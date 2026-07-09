@@ -4,11 +4,12 @@
 v0.5: 从 agent/core.py 拆分，无功能变更。
 """
 
-import requests
 import urllib3
 from bs4 import BeautifulSoup
 from langchain_core.tools import tool
 from urllib.parse import urljoin, urlparse, urldefrag
+
+from .http_client import get, in_scope_url, normalize_url
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -28,6 +29,7 @@ def crawl(root_url: str, max_depth: int = 2, max_pages: int = 30) -> str:
         max_depth: 最大爬取深度（默认 2，建议 2-3）
         max_pages: 最多爬取页数（默认 30）
     """
+    root_url = normalize_url(root_url)
     base_domain = urlparse(root_url).netloc
     visited: set[str] = set()
     queue: list[tuple[str, int]] = [(root_url.rstrip("/"), 0)]
@@ -52,7 +54,7 @@ def crawl(root_url: str, max_depth: int = 2, max_pages: int = 30) -> str:
         visited.add(norm)
 
         try:
-            r = requests.get(url, timeout=8, allow_redirects=True, verify=False)
+            r = get(url, timeout=8)
             status = r.status_code
             content_type = r.headers.get("Content-Type", "")
 
@@ -74,12 +76,9 @@ def crawl(root_url: str, max_depth: int = 2, max_pages: int = 30) -> str:
             for a in soup.find_all("a", href=True):
                 href = urljoin(url, a["href"])
                 href, _ = urldefrag(href)
-                parsed = urlparse(href)
-                if parsed.netloc == base_domain or parsed.netloc == "":
-                    if parsed.scheme in ("http", "https") or parsed.scheme == "":
-                        target = urljoin(url, href).rstrip("/")
-                        if target not in visited:
-                            queue.append((target, depth + 1))
+                target = in_scope_url(root_url, href)
+                if target and target not in visited:
+                    queue.append((target, depth + 1))
 
         except Exception:
             continue
@@ -89,7 +88,7 @@ def crawl(root_url: str, max_depth: int = 2, max_pages: int = 30) -> str:
     for path in sensitive_paths:
         probe_url = urljoin(root_url, path)
         try:
-            r = requests.get(probe_url, timeout=5, allow_redirects=False, verify=False)
+            r = get(probe_url, timeout=5, allow_redirects=False)
             if r.status_code not in (404, 500, 502, 503):
                 sensitive_found.append(f"  {probe_url} → {r.status_code}")
         except Exception:
@@ -133,6 +132,7 @@ def sitemap(root_url: str) -> str:
     参数:
         root_url: 根 URL（会先自动 crawl）
     """
+    root_url = normalize_url(root_url)
     base_domain = urlparse(root_url).netloc
     visited: set[str] = set()
     queue: list[tuple[str, int]] = [(root_url.rstrip("/"), 0)]
@@ -147,7 +147,7 @@ def sitemap(root_url: str) -> str:
         visited.add(norm)
 
         try:
-            r = requests.get(url, timeout=8, allow_redirects=True, verify=False)
+            r = get(url, timeout=8)
             status = r.status_code
             ct = r.headers.get("Content-Type", "")
             is_html = "text/html" in ct
@@ -171,11 +171,9 @@ def sitemap(root_url: str) -> str:
                 for a in soup.find_all("a", href=True):
                     href = urljoin(url, a["href"])
                     href, _ = urldefrag(href)
-                    p = urlparse(href)
-                    if (p.netloc == base_domain or p.netloc == "") and p.scheme in ("http", "https", ""):
-                        target = href.rstrip("/")
-                        if target not in visited:
-                            queue.append((target, depth + 1))
+                    target = in_scope_url(root_url, href)
+                    if target and target not in visited:
+                        queue.append((target, depth + 1))
         except Exception:
             continue
 
@@ -242,6 +240,7 @@ def batch_scan(root_url: str) -> str:
     参数:
         root_url: 目标根 URL
     """
+    root_url = normalize_url(root_url)
     base_domain = urlparse(root_url).netloc
     visited: set[str] = set()
     queue: list[tuple[str, int]] = [(root_url.rstrip("/"), 0)]
@@ -256,7 +255,7 @@ def batch_scan(root_url: str) -> str:
         visited.add(norm)
 
         try:
-            r = requests.get(url, timeout=8, allow_redirects=True, verify=False)
+            r = get(url, timeout=8)
             headers = dict(r.headers)
             results.append({
                 "url": url,
@@ -276,11 +275,9 @@ def batch_scan(root_url: str) -> str:
                 for a in soup.find_all("a", href=True):
                     href = urljoin(url, a["href"])
                     href, _ = urldefrag(href)
-                    p = urlparse(href)
-                    if (p.netloc == base_domain or p.netloc == "") and p.scheme in ("http", "https", ""):
-                        target = href.rstrip("/")
-                        if target not in visited:
-                            queue.append((target, depth + 1))
+                    target = in_scope_url(root_url, href)
+                    if target and target not in visited:
+                        queue.append((target, depth + 1))
         except Exception:
             continue
 

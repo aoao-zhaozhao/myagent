@@ -4,11 +4,12 @@
 v0.5: 从 agent/core.py 拆分，无功能变更。
 """
 
-import requests
 import urllib3
 from bs4 import BeautifulSoup
 from langchain_core.tools import tool
 from urllib.parse import urljoin, urlparse
+
+from .http_client import get, in_scope_url
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -31,7 +32,7 @@ def analyze_headers(url: str) -> str:
         url: 目标 URL
     """
     try:
-        r = requests.get(url, timeout=10, allow_redirects=True, verify=False)
+        r = get(url)
         headers = r.headers
 
         checks = {
@@ -88,7 +89,7 @@ def extract_forms(url: str) -> str:
         url: 目标页面 URL
     """
     try:
-        r = requests.get(url, timeout=10, verify=False)
+        r = get(url)
         soup = BeautifulSoup(r.text, "html.parser")
         forms = soup.find_all("form")
 
@@ -138,6 +139,10 @@ def extract_links(url: str) -> str:
             label = link.get_text(strip=True) or "(无文本)"
             entry = f"  {href}  — {label}"
             if parsed.netloc == base_domain or parsed.netloc == "":
+                scoped = in_scope_url(url, href)
+                if not scoped:
+                    continue
+                entry = f"  {scoped}  — {label}"
                 internal.append(entry)
             else:
                 external.append(entry)

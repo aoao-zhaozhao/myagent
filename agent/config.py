@@ -24,7 +24,7 @@ class AgentConfig:
     )
 
     # ── Agent 行为 ──
-    max_turns: int = 25           # 单次扫描最大推理轮数
+    max_turns: int = 60           # 单次扫描最大 LangGraph 步数
     temperature: float = 0.3      # LLM 温度（安全分析需精确）
 
     # ── RAG 知识库 ──

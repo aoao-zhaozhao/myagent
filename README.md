@@ -1,6 +1,6 @@
 # My Agent — Web 漏洞审查引擎
 
-基于 DeepSeek + LangGraph 的 Web 应用安全扫描 Agent。支持自动爬取、漏洞探测、RAG 知识库验证、安全头分析。通过 FastAPI + WebSocket 提供服务。
+基于 DeepSeek + LangGraph 的 Web 应用安全扫描 Agent。支持自动爬取、JS/API 发现、SPA 渲染、JWT 审计、漏洞探测、RAG 知识库验证和安全头分析。通过 FastAPI + WebSocket 提供服务。
 
 ## 项目结构
 
@@ -11,14 +11,16 @@ my-agent/
 ├── agent/
 │   ├── __init__.py             # 模块入口
 │   ├── config.py               # 配置管理 (AgentConfig)
-│   ├── prompts.py              # System Prompt (v0.5 三步工作流)
+│   ├── prompts.py              # System Prompt (v0.6 工作流)
 │   ├── agent.py                # Agent 核心引擎 (LangGraph)
 │   ├── rag.py                  # RAG 知识库 (Chroma + Qwen3 两阶段检索)
 │   ├── core.py                 # 向后兼容重导出
 │   ├── tools/                  # 扫描工具集
 │   │   ├── http_tools.py       #   http_get / http_post
 │   │   ├── analysis_tools.py   #   analyze_headers / extract_forms / extract_links
-│   │   └── crawl_tools.py      #   crawl / sitemap / batch_scan
+│   │   ├── crawl_tools.py      #   crawl / sitemap / batch_scan
+│   │   ├── static_tools.py     #   analyze_js / decode_jwt / discover_api / render_page
+│   │   └── http_client.py      #   统一请求、同域边界、超时、限速、重试
 │   ├── knowledge/              # 知识库 Markdown 源文件
 │   │   ├── owasp_top10.md      #   OWASP Top 10 (2021) 全 10 类 + 检测/修复
 │   │   ├── common_cves.md      #   精选 CVE 案例 (Log4Shell/Spring4Shell/XSS/SSRF...)
@@ -54,6 +56,19 @@ source myagent/Scripts/activate      # Windows Git Bash
 # 或 myagent\Scripts\Activate.ps1    # Windows PowerShell
 
 pip install -r requirements.txt
+```
+
+国内网络环境建议使用清华 PyPI 源安装依赖：
+
+```bash
+pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements.txt
+```
+
+`render_page` 使用 Playwright 渲染 SPA。首次使用前需要安装 Chromium 浏览器驱动。国内网络环境建议使用 npmmirror 镜像：
+
+```powershell
+$env:PLAYWRIGHT_DOWNLOAD_HOST='https://npmmirror.com/mirrors/playwright'
+python -m playwright install chromium
 ```
 
 ### 3. 下载知识库模型
@@ -94,10 +109,12 @@ http://49.232.142.230:13403
 Agent 会自动：
 1. crawl 爬取所有同域页面 + 探测敏感路径
 2. sitemap 分类统计攻击面
-3. batch_scan 批量检查安全头
-4. 深入每个输入点注入 XSS/SQLi payload
-5. **search_knowledge 查知识库验证**，匹配 CVE/CVSS/修复方案
-6. 输出完整安全审计报告（类型 + 风险等级 + CVE + 证据 + 修复建议）
+3. analyze_js / discover_api 提取 JS 中的 API、JWT、密钥、sourcemap 和调试开关
+4. 对 SPA 页面用 render_page 提取渲染后 DOM 和网络请求
+5. batch_scan 批量检查安全头
+6. 深入每个输入点注入轻量 XSS/SQLi payload
+7. **search_knowledge 查知识库验证**，匹配漏洞分类、CVE/CVSS 参考和修复方案
+8. 输出完整安全审计报告（类型 + 风险等级 + 参考分类/CVE + 证据 + 修复建议）
 
 也支持命令行模式：`python test_client.py`
 
@@ -119,10 +136,14 @@ Agent 会自动：
 | `analyze_headers(url)` | 检查安全头（CSP/HSTS/X-Frame-Options 等） |
 | `extract_forms(url)` | 提取页面所有表单和输入参数 |
 | `extract_links(url)` | 提取页面内链，扩展攻击面 |
+| `analyze_js(url)` | 扫描同域 JS 中的密钥、JWT、API 路径、sourcemap、调试开关 |
+| `decode_jwt(token)` | 解码 JWT 并检查 alg、exp、空签名、高权限声明 |
+| `discover_api(url)` | 探测 OpenAPI / Swagger / GraphQL / 常见 API 入口 |
+| `render_page(url)` | 使用 Playwright 渲染 SPA，提取 DOM、同域请求和链接 |
 | `crawl(url, depth, pages)` | BFS 爬虫，自动发现所有同域页面 + 16 个敏感路径探测 |
 | `sitemap(url)` | 攻击面分类统计（登录页/表单/API/管理后台/静态资源） |
 | `batch_scan(url)` | 批量扫描所有页面安全头 + 整体安全评级 |
-| `search_knowledge(query)` ⭐ | 两阶段 RAG 检索知识库（CVE/CVSS/修复方案） |
+| `search_knowledge(query)` ⭐ | 两阶段 RAG 检索知识库（漏洞分类、CVE/CVSS 参考、修复方案） |
 
 ## 架构
 
@@ -141,7 +162,7 @@ Agent 会自动：
 │   LangGraph Agent (推理面)    │  ← agent/agent.py
 │   • ChatOpenAI → DeepSeek    │
 │   • create_react_agent       │
-│   • 9 个 @tool 工具           │
+│   • 13 个 @tool 工具          │
 │                              │
 │   ┌──────────────────────┐   │
 │   │   RAG 知识库          │   │  ← agent/rag.py
@@ -166,9 +187,16 @@ Agent 会自动：
 ### v0.4 — 深度爬取 + Web 前端
 - 新增 `crawl` / `sitemap` / `batch_scan`，浏览器前端直接对话
 
-### v0.5 — RAG 知识库 ⭐ 当前
+### v0.5 — RAG 知识库
 - **文件拆分**: `core.py` → `config.py` `prompts.py` `agent.py` `tools/` `rag.py`
 - **知识库**: OWASP Top 10 + 精选 CVE 案例 + 代码级修复方案 (3 个 Markdown → 29 个向量块)
 - **两阶段检索**: Qwen3-Embedding-0.6B 粗排 → Qwen3-Reranker-0.6B 精排
 - **新工具**: `search_knowledge(query)` — 语义检索知识库
 - **System Prompt**: 发现漏洞 → 先查知识库 → 带 CVE/CVSS/修复方案输出
+
+### v0.6 — 扫描基础 + 静态分析 + 浏览器渲染 ⭐ 当前
+- **扫描边界**: 统一同域过滤、URL 规范化、超时、轻量限速和重试
+- **JS/API 发现**: 新增 `analyze_js` / `discover_api`
+- **JWT 审计**: 新增 `decode_jwt`
+- **SPA 渲染**: 新增 `render_page`，通过 Playwright 提取渲染后 DOM 和网络请求
+- **System Prompt**: 先做 JS/API/SPA 攻击面发现，再进入漏洞验证和知识库检索

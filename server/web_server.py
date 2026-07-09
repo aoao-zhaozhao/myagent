@@ -1,5 +1,9 @@
 """
-FastAPI 服务器 —— Web 漏洞审查 Agent (v0.5)。
+FastAPI 服务器 —— Web 漏洞审查 Agent (v0.6)。
+
+v0.6: 静态分析 + 浏览器渲染
+  - 新增 analyze_js / discover_api / decode_jwt / render_page
+  - 统一同域边界、超时、限速和重试
 
 v0.5: RAG 知识库
   - 集成 Chroma 向量库 + search_knowledge 工具
@@ -36,7 +40,7 @@ from agent import Agent, AgentConfig
 
 # ─── FastAPI 应用 ──────────────────────────────────────
 
-app = FastAPI(title="Web Security Scanner", version="0.5.0")
+app = FastAPI(title="Web Security Scanner", version="0.6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,6 +62,7 @@ async def get_config():
     return {
         "model": agent_config.model,
         "base_url": agent_config.base_url,
+        "max_turns": agent_config.max_turns,
         "has_api_key": bool(agent_config.api_key),
     }
 
@@ -140,6 +145,7 @@ async def health():
         "status": "ok",
         "model": agent_config.model,
         "engine": "LangGraph",
+        "version": "0.6.0",
         "active_sessions": active_sessions,
     }
 
@@ -157,7 +163,7 @@ if __name__ == "__main__":
     if sys.stdout.encoding != 'utf-8':
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-    print(f"[*] Web Security Scanner v0.5: http://{host}:{port}")
+    print(f"[*] Web Security Scanner v0.6: http://{host}:{port}")
     print(f"    Open the above URL in your browser")
     print(f"    API: /api/health | /api/config | /api/sessions")
 

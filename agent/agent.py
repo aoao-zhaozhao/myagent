@@ -1,5 +1,9 @@
 """
-Agent 核心引擎 — 基于 LangGraph 的 Web 漏洞审查 Agent (v0.5)。
+Agent 核心引擎 — 基于 LangGraph 的 Web 漏洞审查 Agent (v0.6)。
+
+v0.6 变更:
+  - 新增 JS 静态分析 / API 发现 / JWT 解码 / Playwright 渲染工具
+  - 统一扫描边界、请求超时、限速和重试
 
 v0.5 变更:
   - 从 core.py 拆分，Module-based 架构
@@ -30,7 +34,13 @@ from .rag import create_search_knowledge_tool
 
 class Agent:
     """
-    Web 漏洞审查 Agent (v0.5 — RAG 知识库)。
+    Web 漏洞审查 Agent (v0.6 — 静态分析 + 浏览器渲染)。
+
+    v0.6 新增:
+        - analyze_js: 扫描 JS 中的密钥、JWT、API 路径和 sourcemap
+        - discover_api: 探测 OpenAPI / Swagger / GraphQL / API 入口
+        - decode_jwt: 解码 JWT 并审计安全配置
+        - render_page: 使用 Playwright 渲染 SPA 页面
 
     v0.5 新增:
         - search_knowledge: 语义检索知识库，匹配 CVE/CVSS/修复方案
@@ -110,6 +120,7 @@ class Agent:
 
         async for event in self.agent.astream_events(
             {"messages": list(self.messages)},
+            config={"recursion_limit": self.config.max_turns},
             version="v2",
         ):
             kind = event["event"]

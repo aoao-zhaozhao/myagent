@@ -4,9 +4,10 @@ HTTP 基础工具: GET / POST 请求。
 v0.5: 从 agent/core.py 拆分，无功能变更。
 """
 
-import requests
 import urllib3
 from langchain_core.tools import tool
+
+from .http_client import get, post, truncate_text
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -22,19 +23,19 @@ def http_get(url: str) -> str:
         url: 目标 URL（如 http://example.com/page?id=1）
     """
     try:
-        r = requests.get(url, timeout=10, allow_redirects=True, verify=False)
+        r = get(url)
         headers_str = "\n".join(f"  {k}: {v}" for k, v in r.headers.items())
         return (
             f"[GET] {url}\n"
             f"Status: {r.status_code} {r.reason}\n"
             f"Response Headers:\n{headers_str}\n\n"
-            f"Body (first 3000 chars):\n{r.text[:3000]}"
+            f"Body (first 3000 chars):\n{truncate_text(r.text)}"
         )
-    except requests.exceptions.Timeout:
-        return f"[GET] {url}\nError: 请求超时"
-    except requests.exceptions.ConnectionError:
-        return f"[GET] {url}\nError: 无法连接到目标服务器"
     except Exception as e:
+        if e.__class__.__name__ == "Timeout":
+            return f"[GET] {url}\nError: 请求超时"
+        if e.__class__.__name__ == "ConnectionError":
+            return f"[GET] {url}\nError: 无法连接到目标服务器"
         return f"[GET] {url}\nError: {str(e)}"
 
 
@@ -52,12 +53,12 @@ def http_post(url: str, data: str = "", content_type: str = "application/x-www-f
     """
     try:
         headers = {"Content-Type": content_type}
-        r = requests.post(url, data=data, headers=headers, timeout=10, allow_redirects=True, verify=False)
+        r = post(url, data=data, headers=headers)
         return (
             f"[POST] {url}\n"
             f"Payload: {data[:500]}\n"
             f"Status: {r.status_code}\n"
-            f"Body (first 3000 chars):\n{r.text[:3000]}"
+            f"Body (first 3000 chars):\n{truncate_text(r.text)}"
         )
     except Exception as e:
         return f"[POST] {url}\nError: {str(e)}"
