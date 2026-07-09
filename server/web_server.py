@@ -102,10 +102,15 @@ async def chat(ws: WebSocket):
                 continue
 
             # 通过 LangGraph agent 流式扫描
-            async for token in agent.run(user_input):
-                await ws.send_json({"type": "token", "content": token})
-
-            await ws.send_json({"type": "done"})
+            try:
+                async for token in agent.run(user_input):
+                    await ws.send_json({"type": "token", "content": token})
+                await ws.send_json({"type": "done"})
+            except Exception as exc:
+                import traceback
+                tb = traceback.format_exc()
+                print(f"[ERROR] Agent 异常:\n{tb}")
+                await ws.send_json({"type": "error", "content": f"扫描出错: {str(exc)}"})
 
     except WebSocketDisconnect:
         print(f"[WS] 客户端断开连接 (活跃: {active_sessions - 1})")

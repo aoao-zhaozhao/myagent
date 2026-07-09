@@ -39,9 +39,11 @@ python -m venv myagent
 source myagent/Scripts/activate      # Windows Git Bash
 # 或 myagent\Scripts\activate.bat    # Windows CMD
 # 或 myagent\Scripts\Activate.ps1    # Windows PowerShell
-
+# deactivate #退出虚拟环境
 pip install -r requirements.txt
 ```
+
+
 
 ### 3. 启动服务
 
