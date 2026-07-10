@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Web Security Scanner v1.1</title>
+<title>Web Security Scanner v1.4</title>
 <style>
   :root {
     --bg: #111311;
@@ -582,7 +582,7 @@
     <div class="brand">
       <div>
         <h1>Web Security Scanner</h1>
-        <div class="version">v1.1</div>
+        <div class="version">v1.4</div>
       </div>
       <div class="brand-actions">
         <button class="icon-btn" id="toolsBtn" title="工具目录 (34)">📦</button>
@@ -699,7 +699,7 @@
 
 <script>
 const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/chat`;
-const STORAGE_KEY = 'my-agent-v11-sessions';
+const STORAGE_KEY = 'my-agent-v14-sessions';
 const LEGACY_STORAGE_KEY = 'my-agent-v07-sessions';
 const STAGE_LABELS = {
   scope: '范围',
@@ -1407,7 +1407,7 @@ function exportActiveSession() {
   const session = activeSession();
   const payload = {
     exported_at: new Date().toISOString(),
-    format: 'my-agent-scan-v1.1',
+    format: 'my-agent-scan-v1.4',
     session
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
