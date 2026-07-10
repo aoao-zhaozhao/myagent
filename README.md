@@ -1,6 +1,8 @@
 # WebSec Research Agent — Web 漏洞审查引擎
 
-基于 DeepSeek + LangGraph 的 Web 应用安全扫描 Agent。支持自动爬取、JS/API 发现、SPA 渲染、JWT 审计、SQLi/XSS/LFI 受限差分验证、CSS 注入 / Scriptless XSS 高级利用工具、RAG 知识库验证和安全头分析。通过 FastAPI + WebSocket 提供可观察的扫描阶段、证据与报告工作台。
+基于 DeepSeek + LangGraph 的 Web 应用安全扫描 Agent。覆盖 **SQLi / XSS / 命令注入 / SSTI / LFI / SSRF / JWT 攻击 / IDOR / 提权 / OOB 外带确认** 共 10 大攻击类别，34 个注册工具，80+ 内置 payload，8 个 RAG 知识库文件。通过 FastAPI + WebSocket 提供可观察的扫描阶段、实时工具轨迹和漏洞证据工作台。工具目录面板可一览全部能力。
+
+> **v1.4** 从 [Shannon OSS](https://github.com/keygraph/shannon)（AI 白盒渗透测试引擎）迁移了 SSRF、命令注入、SSTI、JWT 攻击、授权攻击和 OOB 盲确认等攻击模式。所有工具为 Python 原创实现，设计思路源自 Shannon 的提示词架构。
 
 ## 项目结构
 
@@ -11,37 +13,48 @@ my-agent/
 ├── agent/
 │   ├── __init__.py             # 模块入口
 │   ├── config.py               # 配置管理 (AgentConfig)
-│   ├── prompts.py              # System Prompt (v1.2 工作流)
+│   ├── prompts.py              # System Prompt (v1.4 全类别工作流)
 │   ├── agent.py                # Agent 核心引擎 (LangGraph)
 │   ├── rag.py                  # RAG 知识库 (Chroma + Qwen3 两阶段检索)
 │   ├── core.py                 # 向后兼容重导出
-│   ├── tools/                  # 扫描工具集
-│   │   ├── http_tools.py       #   http_get / http_post
+│   ├── scan_state.py           # 6 阶段扫描状态机
+│   ├── skill_manager.py        # 技能生命周期管理 ← v1.3
+│   ├── session_db.py           # SQLite 持久化 (FTS5) ← v1.3
+│   ├── tools/                  # 扫描工具集（34 个工具）
+│   │   ├── http_tools.py       #   http_get / http_post / http_request
 │   │   ├── analysis_tools.py   #   analyze_headers / extract_forms / extract_links
 │   │   ├── crawl_tools.py      #   crawl / sitemap / batch_scan
 │   │   ├── static_tools.py     #   analyze_js / decode_jwt / discover_api / render_page
 │   │   ├── lfi_tools.py        #   test_lfi_param
-│   │   ├── exploit_tools.py    #   css_exfil_payload / webhook_reconstruct  ← v1.2
-│   │   ├── skill_tools.py      #   skill_list / skill_load / skill_create / skill_patch / scan_reflect  ← v1.3
+│   │   ├── verification_tools.py # verify_injection (SQLi/XSS/LFI 差分验证)
+│   │   ├── exploit_tools.py    #   css_exfil_payload / webhook_reconstruct
+│   │   ├── ssrf_tools.py       #   test_ssrf / probe_internal_port ← v1.4
+│   │   ├── command_injection_tools.py # test_command_injection / test_ssti ← v1.4
+│   │   ├── jwt_attack_tools.py #   jwt_alg_none_attack / jwt_hmac_brute / jwt_key_confusion ← v1.4
+│   │   ├── authz_tools.py      #   test_idor / test_privilege_escalation / test_role_manipulation ← v1.4
+│   │   ├── oob_tools.py        #   generate_oob_payload / check_oob_callbacks ← v1.4
+│   │   ├── skill_tools.py      #   skill_list / skill_load / skill_create / skill_patch / scan_reflect
+│   │   ├── structured.py       #   ToolResult 协议包装器
+│   │   ├── results.py          #   ToolResult / Finding / Evidence 数据模型
 │   │   └── http_client.py      #   统一请求、同域边界、超时、限速、重试
-│   ├── knowledge/              # 知识库 Markdown 源文件
+│   ├── payloads/
+│   │   └── injection.json      # 19 类别 × 80+ payload (SQLi盲注/UNION/NoSQL/命令注入/SSTI/SSRF/XXE) ← v1.4
+│   ├── knowledge/              # 知识库 Markdown 源文件（8 个）
 │   │   ├── owasp_top10.md      #   OWASP Top 10 (2021) 全 10 类 + 检测/修复
 │   │   ├── common_cves.md      #   精选 CVE 案例 (Log4Shell/Spring4Shell/XSS/SSRF...)
 │   │   ├── remediation.md      #   代码级修复方案 (Python/Java/Nginx/Apache)
-│   │   └── css_injection.md    #   Scriptless XSS / CSS 数据外带 / CSP 绕过 ← v1.2
-│   ├── skills/                 # 自进化技能库 ← v1.3
-│   │   ├── css_injection/      #   CSS注入相关技能 (如 css-exfil-otp)
-│   │   ├── sqli/ xss/ lfi/     #   按漏洞类型组织的经验技能
-│   │   └── general/            #   通用扫描技巧
-│   ├── skill_manager.py        # 技能生命周期管理 ← v1.3
-│   ├── session_db.py           # SQLite 持久化 (FTS5) ← v1.3
+│   │   ├── css_injection.md    #   Scriptless XSS / CSS 数据外带 / CSP 绕过
+│   │   ├── ssrf.md             #   SSRF 攻击分类 / 云元数据 / 协议绕过 ← v1.4
+│   │   ├── command_injection.md #  命令注入 / Shell 元字符 / 盲注检测 ← v1.4
+│   │   ├── auth_vulns.md       #   认证漏洞 / JWT 攻击 / 授权绕过大全 ← v1.4
+│   │   └── ssti.md             #   SSTI 6 引擎 payload / 盲 SSTI ← v1.4
+│   ├── skills/                 # 自进化技能库
+│   │   └── css_injection/      #   种子技能: css-exfil-otp
 │   └── models/                 # 本地模型 (.gitignore 排除)
-│       ├── qwen3-embedding-0.6b/   # 1024 维 Embedding
-│       └── qwen3-reranker-0.6b/   # CrossEncoder 精排
 ├── server/
-│   └── web_server.py           # FastAPI 服务器 (WebSocket + REST + 前端页面)
+│   └── web_server.py           # FastAPI 服务器 (WebSocket + REST + /api/tools)
 ├── web/
-│   └── index.html              # 浏览器聊天页面
+│   └── index.html              # 浏览器工作台 (含 📦 工具目录面板)
 └── test_client.py              # 命令行交互客户端（可选）
 ```
 
@@ -62,9 +75,9 @@ AGENT_MAX_TURNS=120
 AGENT_HISTORY_MESSAGES=24
 ```
 
-`deepseek-v4-flash` 用于默认扫描；在“模型与思考”设置中可切换到 `deepseek-v4-pro`。思考模式显式传递 `thinking.enabled` 和 `reasoning_effort`（`high` / `max`），运行时不会传递与思考模式不兼容的 `temperature`。模型、思考开关和强度会在下一次扫描生效。
+`deepseek-v4-flash` 用于默认扫描；在"模型与思考"设置中可切换到 `deepseek-v4-pro`。思考模式显式传递 `thinking.enabled` 和 `reasoning_effort`（`high` / `max`），运行时不会传递与思考模式不兼容的 `temperature`。模型、思考开关和强度会在下一次扫描生效。
 
-每次扫描最多执行 `AGENT_MAX_TURNS` 个 LangGraph 步骤（默认 120，配置接口允许 10-240）；会话上下文保留系统提示和最近 `AGENT_HISTORY_MESSAGES` 条已完成消息（默认 24），避免长会话无限增长并导致模型上下文耗尽。扫描过程中显示的 reasoning 仅用于当前页面实时查看，不写入会话历史。
+每次扫描最多执行 `AGENT_MAX_TURNS` 个 LangGraph 步骤（默认 120，配置接口允许 10-240）；会话上下文保留系统提示和最近 `AGENT_HISTORY_MESSAGES` 条已完成消息（默认 24），避免长会话无限增长并导致模型上下文耗尽。
 
 ### 2. 安装依赖
 
@@ -83,7 +96,7 @@ pip install -r requirements.txt
 pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements.txt
 ```
 
-`render_page` 使用 Playwright 渲染 SPA。首次使用前需要安装 Chromium 浏览器驱动。国内网络环境建议使用 npmmirror 镜像：
+`render_page` 使用 Playwright 渲染 SPA。首次使用前需要安装 Chromium 浏览器驱动：
 
 ```powershell
 $env:PLAYWRIGHT_DOWNLOAD_HOST='https://npmmirror.com/mirrors/playwright'
@@ -111,7 +124,7 @@ rm -rf agent/models/models agent/models/.lock
 
 > 模型共 ~2.4GB，首次启动时会自动索引知识库文档。v0.8 起 RAG 会自动检测 CUDA：可用时 Embedding 和 Reranker 使用 GPU，否则回退 CPU。
 
-如需在 Windows + NVIDIA GPU 环境启用 CUDA 版 PyTorch，可按实际驱动选择 PyTorch wheel。当前验证过的组合：
+如需在 Windows + NVIDIA GPU 环境启用 CUDA 版 PyTorch：
 
 ```powershell
 python -m pip install --upgrade --force-reinstall --no-deps "https://mirrors.aliyun.com/pytorch-wheels/cu130/torch-2.12.1%2Bcu130-cp313-cp313-win_amd64.whl"
@@ -125,86 +138,108 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 python server/web_server.py
 ```
 
-停止服务：
+浏览器打开 **http://127.0.0.1:9120**，在输入框输入目标 URL 即可开始扫描。
 
-```powershell
-# 当前终端启动时按 Ctrl+C；后台运行时释放 9120 端口
-Get-NetTCPConnection -LocalPort 9120 | ForEach-Object {
-  Stop-Process -Id $_.OwningProcess -Force
-}
-```
+### 5. 扫描能力
 
-### 5. 开始扫描
+Agent 覆盖 10 大攻击类别，34 个工具自动协作：
 
-浏览器打开 **http://127.0.0.1:9120**，在输入框输入 URL：
-
-```
-http://49.232.142.230:13403
-```
-
-Agent 会自动：
-1. crawl 爬取所有同域页面 + 探测敏感路径
-2. sitemap 分类统计攻击面
-3. analyze_js / discover_api 提取 JS 中的 API、JWT、密钥、sourcemap 和调试开关
-4. 对 SPA 页面用 render_page 提取渲染后 DOM 和网络请求
-5. batch_scan 批量检查安全头
-6. 对授权输入点调用 `verify_injection`，用 baseline、无效值和受限 SQLi/XSS/LFI payload 做差分验证
-7. 对疑似 LFI 参数调用 `test_lfi_param` 做 bounded payload 验证、响应差分和 flag-like 提取
-8. **search_knowledge 查知识库验证**，匹配漏洞分类、CVE/CVSS 参考和修复方案
-9. 对 CSP 限制 JS 但未限制 CSS 的场景，调用 **`css_exfil_payload`** 构造 Scriptless XSS 外带 Payload ← v1.2
-10. 从 webhook 日志用 **`webhook_reconstruct`** 还原逐字符泄露的 OTP / Token / Secret ← v1.2
-11. 输出完整安全审计报告（类型 + 风险等级 + 参考分类/CVE + 证据 + 修复建议）
-12. **`scan_reflect`** 反思本次扫描得失 ← v1.3
-13. **`skill_create`** 将成功的攻击模式沉淀为可复用技能 ← v1.3
-
-也支持命令行模式：`python test_client.py`
-
-Web 工作台底部按钮：
-
-| 按钮 | 作用 |
+| 阶段 | 执行的操作 |
 |---|---|
-| `▶` | 开始扫描 |
-| `■` | 停止当前扫描，不清空当前会话 |
-| `×` | 清空当前会话内容和 Agent 记忆 |
-
-关闭浏览器标签页会断开 WebSocket，会话生命周期随连接结束。当前侧边栏会话保存在浏览器 `localStorage`，不是后端持久化；换浏览器、换端口或清理站点数据后可能丢失。`×` 只清空内容，`■` 用于取消正在运行的扫描任务。
+| 攻击面测绘 | crawl 爬取 → sitemap 分类 → analyze_js / discover_api / render_page 发现 JS/API/SPA |
+| 注入验证 | verify_injection (SQLi/XSS/LFI) + test_command_injection + test_ssti + test_lfi_param |
+| SSRF 检测 | test_ssrf (云元数据/内网/协议) + probe_internal_port (端口扫描) |
+| JWT 攻击 | decode_jwt → jwt_alg_none_attack → jwt_hmac_brute → jwt_key_confusion |
+| 授权攻击 | test_idor (水平越权) + test_privilege_escalation (头注入提权) + test_role_manipulation |
+| OOB 确认 | generate_oob_payload + check_oob_callbacks (盲 SSRF/命令注入/SQLi/XXE) |
+| 高级利用 | css_exfil_payload + webhook_reconstruct (CSS 数据外带) |
+| 知识验证 | search_knowledge (RAG 两阶段检索 → OWASP/CVE/CVSS/修复) |
+| 自进化 | scan_reflect → skill_create / skill_patch (沉淀成功模式) |
+| 报告 | 按 confirmed / likely / weak / unconfirmed 分组 + 证据 + 复现步骤 + 修复建议 |
 
 ## API 接口
 
 | 接口 | 方法 | 说明 |
 |---|---|---|
-| `/api/chat` | WebSocket | 核心对话——逐 token 流式输出，提供 `scan_started`、`stage_started`、`stage_progress`、`tool_started`、`tool_finished`、`finding_created`、`scan_finished` 事件；工具完成事件附带结构化 `result`；支持 `clear` / `stop` 命令 |
-| `/api/config` | GET/PUT | 查看/修改模型、thinking、`high/max` 强度、最大步骤和会话历史窗口；设置在下一次扫描生效 |
+| `/api/chat` | WebSocket | 核心对话——逐 token 流式输出，提供 `scan_started`、`stage_started`、`stage_progress`、`tool_started`、`tool_finished`、`finding_created`、`scan_finished` 事件 |
+| `/api/config` | GET/PUT | 查看/修改模型、thinking 开关、`high/max` 强度、最大步骤和会话历史窗口 |
+| `/api/tools` | GET | 工具目录——返回 34 个工具按 9 类别分组，含名称、描述、参数 Schema |
 | `/api/sessions` | GET | 活跃连接数 |
 | `/api/health` | GET | 健康检查 |
 
-## 扫描工具
+## 扫描工具（34 个）
 
-| 工具 | 用途 |
+### 🌐 HTTP 基础
+| 工具 | 说明 |
 |---|---|
 | `http_get(url)` | GET 请求，获取页面内容和响应头 |
-| `http_post(url, data)` | POST 请求，发送测试 payload（XSS/SQLi） |
-| `http_request(method, url, data, headers_json)` | 发送受约束的 GET/POST/PUT/PATCH/HEAD/OPTIONS 请求；用于验证明确要求的 HTTP 方法 |
-| `analyze_headers(url)` | 检查安全头（CSP/HSTS/X-Frame-Options 等） |
+| `http_post(url, data)` | POST 请求，发送测试 payload |
+| `http_request(method, url, data, headers_json)` | 受约束的 GET/POST/PUT/PATCH/HEAD/OPTIONS |
+
+### 🔍 攻击面测绘
+| 工具 | 说明 |
+|---|---|
+| `crawl(url, depth, pages)` | BFS 爬虫 + 17 个敏感路径探测 |
+| `sitemap(url)` | 攻击面分类（登录/表单/API/管理后台/静态资源） |
+| `batch_scan(url)` | 批量安全头检查 + 安全评级 (A/B/C) |
 | `extract_forms(url)` | 提取页面所有表单和输入参数 |
 | `extract_links(url)` | 提取页面内链，扩展攻击面 |
-| `analyze_js(url)` | 扫描同域 JS 中的密钥、JWT、API 路径、sourcemap、调试开关 |
-| `decode_jwt(token)` | 解码 JWT 并检查 alg、exp、空签名、高权限声明 |
-| `discover_api(url)` | 探测 OpenAPI / Swagger / GraphQL / 常见 API 入口 |
-| `render_page(url)` | 使用 Playwright 渲染 SPA，提取 DOM、同域请求和链接 |
-| `test_lfi_param(url, param)` | 对疑似 LFI 参数做 bounded payload 验证、响应差分和 flag-like 提取 |
-| `verify_injection(url, param, vuln_type, method, form_data)` | 对 GET 参数或表单 POST 做受限 SQLi/XSS/LFI 验证，记录控制请求、payload 和差分证据 |
-| `crawl(url, depth, pages)` | BFS 爬虫，自动发现所有同域页面 + 16 个敏感路径探测 |
-| `sitemap(url)` | 攻击面分类统计（登录页/表单/API/管理后台/静态资源） |
-| `batch_scan(url)` | 批量扫描所有页面安全头 + 整体安全评级 |
-| `search_knowledge(query)` ⭐ | 两阶段 RAG 检索知识库（漏洞分类、CVE/CVSS 参考、修复方案） |
-| `css_exfil_payload(url, param, webhook_url, extract_length, charset, selector)` 🆕 | 生成 CSS 属性选择器 payload，用于 Scriptless XSS 数据外带（CSP style-src 绕过） |
-| `webhook_reconstruct(logs, param_name)` 🆕 | 从 webhook 请求日志中解析并还原逐字符泄露的 secret 值 |
-| `skill_list(category)` 🆕 v1.3 | 列出技能库中所有已沉淀的经验技能 |
-| `skill_load(name)` 🆕 v1.3 | 加载指定技能到当前扫描上下文 |
-| `skill_create(title, description, body, category, tags)` 🆕 v1.3 | 将成功经验沉淀为可复用技能（SKILL.md 格式） |
-| `skill_patch(name, old_text, new_text)` 🆕 v1.3 | 改进已有技能——替换指定文本段落 |
-| `scan_reflect(target, findings_summary, successful_techniques, failed_attempts)` 🆕 v1.3 | 扫描后反思：分析得失并建议是否创建/更新技能 |
+| `analyze_js(url)` | 扫描 JS 中的密钥/JWT/API 路径/sourcemap/调试开关 |
+| `discover_api(url)` | 探测 OpenAPI/Swagger/GraphQL/常见 API 入口 |
+| `render_page(url)` | Playwright 渲染 SPA，提取 DOM 和网络请求 |
+| `analyze_headers(url)` | 检查安全头（CSP/HSTS/X-Frame-Options 等） |
+
+### 💉 注入验证
+| 工具 | 说明 |
+|---|---|
+| `verify_injection(url, param, vuln_type, method, form_data)` | SQLi/XSS/LFI 受限差分验证（baseline+对照+payload） |
+| `test_lfi_param(url, param)` | LFI 专项：22 payload + 响应差分 + flag 提取 |
+| `test_command_injection(url, param, method, param_location, body)` | 命令注入：shell 元字符 + 时序盲注 + 响应分析 ← v1.4 |
+| `test_ssti(url, param, method, param_location, body)` | SSTI 检测：6 种模板引擎数学表达式 + 错误指纹 ← v1.4 |
+| `decode_jwt(token)` | JWT 被动审计：alg/exp/空签名/高权限声明 |
+
+### 🔄 SSRF 检测
+| 工具 | 说明 |
+|---|---|
+| `test_ssrf(url, param, method, body_template, param_location)` | 云元数据(AWS/Azure/GCP) + 内网主机 + 危险协议(file/gopher/dict) ← v1.4 |
+| `probe_internal_port(url, param, host, ports)` | 通过 SSRF 向量扫描内网端口，发现服务 ← v1.4 |
+
+### 🔑 JWT 攻击
+| 工具 | 说明 |
+|---|---|
+| `jwt_alg_none_attack(jwt_token, target_url, ...)` | alg:none 签名绕过 + 自动 payload 提权 ← v1.4 |
+| `jwt_hmac_brute(jwt_token, wordlist)` | HS256/384/512 弱密钥爆破（内置 18 个常见弱密钥） ← v1.4 |
+| `jwt_key_confusion(jwt_token, public_key_pem, ...)` | RS256→HS256 密钥混淆攻击（CVE-2016-5431） ← v1.4 |
+
+### 🛡️ 授权攻击
+| 工具 | 说明 |
+|---|---|
+| `test_idor(url, param, method, headers_json)` | IDOR 水平越权：顺序 ID 枚举 + 响应差异分析 ← v1.4 |
+| `test_privilege_escalation(url, method, headers_json)` | 垂直提权：16 种头注入（X-Role/X-Admin/X-Forwarded-For 等） ← v1.4 |
+| `test_role_manipulation(url, method, body_json, headers_json)` | 角色操控：请求体中 role/is_admin/permission 字段篡改 ← v1.4 |
+
+### 📡 OOB 外带确认
+| 工具 | 说明 |
+|---|---|
+| `generate_oob_payload(vuln_type, session_id, exfil_param)` | 生成盲 SSRF/SQLi/命令注入/XXE/XSS 的外带 callback payload ← v1.4 |
+| `check_oob_callbacks(session_id, poll_wait)` | 轮询 Interactsh 确认外带回调（盲漏洞确认） ← v1.4 |
+
+### ⚡ 高级利用 (CTF)
+| 工具 | 说明 |
+|---|---|
+| `css_exfil_payload(url, param, webhook_url, ...)` | CSS 属性选择器 payload 生成（Scriptless XSS 数据外带） |
+| `webhook_reconstruct(logs, param_name)` | Webhook 日志解析还原逐字符泄露的 secret |
+
+### 🧬 自进化技能
+| 工具 | 说明 |
+|---|---|
+| `skill_list(category)` | 列出技能库中所有已沉淀的经验技能 |
+| `skill_load(name)` | 加载指定技能到当前扫描上下文 |
+| `skill_create(title, description, body, category, tags)` | 将成功经验沉淀为可复用技能 |
+| `skill_patch(name, old_text, new_text)` | 改进已有技能 |
+| `scan_reflect(target, findings_summary, successful_techniques, failed_attempts)` | 扫描后反思：分析得失并建议技能创建/更新 |
+
+> 加上 RAG 知识库的 `search_knowledge`，共 **34 个已注册工具**。点击工作台侧边栏 📦 按钮可查看完整工具目录。
 
 ## 架构
 
@@ -215,7 +250,8 @@ Web 工作台底部按钮：
     ▼
 ┌──────────────────────────────┐
 │      FastAPI (控制面)         │  ← server/web_server.py
-│      WebSocket + REST         │
+│      /api/chat /api/config    │
+│      /api/tools /api/health   │
 └──────────────┬───────────────┘
                │ 函数调用
                ▼
@@ -223,13 +259,19 @@ Web 工作台底部按钮：
 │   LangGraph Agent (推理面)    │  ← agent/agent.py
 │   • ChatOpenAI → DeepSeek    │
 │   • create_react_agent       │
-│   • 14 个 @tool 工具          │
+│   • 34 个 @tool 工具          │
 │                              │
 │   ┌──────────────────────┐   │
 │   │   RAG 知识库          │   │  ← agent/rag.py
 │   │   Stage 1: Embedding  │   │     Qwen3-Embedding-0.6B
 │   │   Stage 2: Reranker   │   │     Qwen3-Reranker-0.6B
-│   │   Chroma 向量库        │   │
+│   │   8 个知识文件 → 向量   │   │
+│   └──────────────────────┘   │
+│                              │
+│   ┌──────────────────────┐   │
+│   │   自进化技能库         │   │  ← agent/skill_manager.py
+│   │   SKILL.md 格式        │   │
+│   │   9 个漏洞类别          │   │
 │   └──────────────────────┘   │
 └──────────────────────────────┘
 ```
@@ -237,80 +279,60 @@ Web 工作台底部按钮：
 ## 版本演进
 
 ### v0.1 — 基础框架
-- 手写 ReAct 循环，支持 DeepSeek 调用 + 2 个工具（计算器/时间）
+手写 ReAct 循环，支持 DeepSeek 调用 + 2 个工具。
 
 ### v0.2 — 多轮对话记忆
-- `self.messages` 跨 `run()` 累积，Agent 实例绑定 WS 连接生命周期
+`self.messages` 跨 `run()` 累积，Agent 实例绑定 WS 连接生命周期。
 
 ### v0.3 — LangGraph 重构 + Web 漏洞扫描
-- 手写 ReAct → `langgraph.prebuilt.create_react_agent`，新增 5 个扫描工具
+手写 ReAct → `langgraph.prebuilt.create_react_agent`，新增 5 个扫描工具。
 
 ### v0.4 — 深度爬取 + Web 前端
-- 新增 `crawl` / `sitemap` / `batch_scan`，浏览器前端直接对话
+新增 `crawl` / `sitemap` / `batch_scan`，浏览器前端直接对话。
 
 ### v0.5 — RAG 知识库
-- **文件拆分**: `core.py` → `config.py` `prompts.py` `agent.py` `tools/` `rag.py`
-- **知识库**: OWASP Top 10 + 精选 CVE 案例 + 代码级修复方案 (3 个 Markdown → 29 个向量块)
-- **两阶段检索**: Qwen3-Embedding-0.6B 粗排 → Qwen3-Reranker-0.6B 精排
-- **新工具**: `search_knowledge(query)` — 语义检索知识库
-- **System Prompt**: 发现漏洞 → 先查知识库 → 带 CVE/CVSS/修复方案输出
+- Qwen3-Embedding-0.6B + Qwen3-Reranker-0.6B 两阶段检索
+- 3 个知识文件 → 29 个向量块
+- 新增 `search_knowledge(query)`
 
 ### v0.6 — 扫描基础 + 静态分析 + 浏览器渲染
-- **扫描边界**: 统一同域过滤、URL 规范化、超时、轻量限速和重试
-- **JS/API 发现**: 新增 `analyze_js` / `discover_api`
-- **JWT 审计**: 新增 `decode_jwt`
-- **SPA 渲染**: 新增 `render_page`，通过 Playwright 提取渲染后 DOM 和网络请求
-- **System Prompt**: 先做 JS/API/SPA 攻击面发现，再进入漏洞验证和知识库检索
+- 统一同域过滤、URL 规范化、超时、限速、重试
+- 新增 `analyze_js` / `discover_api` / `decode_jwt` / `render_page`
 
 ### v0.7 — LFI 专项验证 + 工作台 UI
-- **LFI 专项工具**: 新增 `test_lfi_param(url, param)`，自动建立 baseline、测试有限 payload、做响应差分和证据评分
-- **Flag 提取**: 自动匹配 `flag{...}` / `ctf{...}` / `BUGKU{...}` / `key{...}` 等常见格式
-- **工具事件流**: `Agent.run_events()` 透传 `tool_start` / `tool_end`，前端实时展示工具轨迹
-- **停止扫描**: WebSocket 支持 `stop` 命令，前端新增 `■` 停止按钮
-- **工作台 UI**: 会话历史、阶段进度、Markdown 报告、工具卡片和风险摘录
-- **发布口径**: 原计划 v0.8 的核心 UI 能力合并到 v0.7 发布，tag 为 `v0.7`
+- 新增 `test_lfi_param` + Flag 自动提取
+- WebSocket 事件流 + 前端工具轨迹卡片
 
 ### v0.8 — CUDA RAG 加速 + 工作台稳定性
-- **CUDA 运行环境**: 验证 Windows + NVIDIA GPU 下 `torch 2.12.1+cu130`，`torch.cuda.is_available()` 正常返回 `True`
-- **RAG 自动设备选择**: Embedding 和 Reranker 统一使用 `cuda` / `cpu` 自动选择
-- **Reranker 显存控制**: GPU 下使用 `float16`、小批量推理和动态 padding，避免固定 8192 token padding 导致 12GB 显存 OOM
-- **前端布局修复**: 消息区独立滚动，输入栏固定在工作台底部，不再随对话增长被挤出视口
-- **会话历史设计澄清**: 当前为 `localStorage` 本地缓存，后续后端持久化将参考 transcript/SQLite 方案实现
+- GPU 自动检测 + float16 小批量推理
+- 前端布局修复
 
 ### v0.9 — 结构化证据协议 + 工具可靠性
-- **统一结果协议**: 所有注册扫描工具返回可读摘要和 `ToolResult` JSON envelope，包含 `tool`、`target`、`status`、`summary`、`findings`、`errors`、`raw_excerpt`、请求/响应记录扩展字段
-- **事件透传**: `tool_end` 在保留原有 `output` 摘要的同时发送机器可读 `result`，前端工具卡片可查看结构化证据
-- **错误分类**: 超时、连接、解析、范围和工具故障以统一错误类型输出
-- **统一请求路径**: `extract_links` 改用 `http_client`，复用同源边界、超时、限速和重试策略
-- **HTTP 方法验证**: 新增 `http_request`，在源码或 `Allow` 响应头明确要求时可执行 PUT/PATCH 等受约束方法
-- **回归测试**: 新增 mock HTTP 测试，覆盖安全头、空表单、链接、超时、爬取和 LFI 基线失败
+- 统一 `ToolResult` JSON envelope（tool/target/status/findings/errors）
+- 所有工具原生输出结构化证据
 
 ### v1.0.0 — 原生证据 + 主动验证引擎
-- **原生 ToolResult**: `http_request`、页面分析、爬取、批量扫描和 LFI 工具直接构造请求、响应和 finding 证据，不再由文本适配器恢复字段
-- **主动验证**: 新增 `verify_injection`，只允许授权范围内的 GET / 表单 POST，并对 SQLi、XSS、LFI 建立 baseline、无效值和受限 payload 差分
-- **证据强度**: 统一使用 `confirmed` / `likely` / `weak` / `unconfirmed`，报告按已确认、疑似、信息项、未确认分组；弱信号不得提升为已确认
-- **靶场回归**: 本地 HTTP 靶场覆盖三类 confirmed 信号、弱信号、POST、超时和 payload 解析失败
+- 新增 `verify_injection`：baseline + 无效对照 + 受限 payload 差分验证
+- confirmed / likely / weak / unconfirmed 四级置信度
 
 ### v1.1.0 — 扫描状态机 + UI 2.0
-- **显式扫描状态**: 扫描具有独立 `scan_id`，将 LangGraph 工具调用投影为 `scope -> crawl -> enumerate -> verify -> knowledge -> report` 阶段快照；停止后保留已完成阶段与证据。
-- **结构化事件流**: WebSocket 发送阶段开始、阶段进度、工具开始/完成、finding 创建和扫描完成事件；工具耗时、错误数与 finding 数由事件统计。
-- **证据工作台**: 右栏显示阶段、目标、耗时、统计和按 severity/confidence 呈现的漏洞卡；卡片可展开查看 evidence 与复现步骤。
-- **会话操作**: 浏览器本地会话支持重命名、删除和 JSON 导出当前扫描；移动端仍可查看状态与证据栏。
-- **Markdown**: 安全的行级渲染支持标题、代码块、列表和表格。
-- **模型与上下文**: 默认使用 `deepseek-v4-flash`；可在工作台切换 Flash/Pro、thinking 与 `high/max` 强度，实时显示 `reasoning_content`；将最大步骤提高到 120，并限制历史消息窗口避免长会话中断。
+- 6 阶段扫描生命周期（scope → crawl → enumerate → verify → knowledge → report）
+- 结构化事件流 + 证据工作台 + Markdown 渲染
 
 ### v1.2.0 — 高级利用工具 + 知识库扩展
-- **CSS 注入知识库**: 新增 `css_injection.md`，覆盖 Scriptless XSS、CSS 属性选择器数据外带、CSP `style-src` 绕过、`@import` 链式加载、逐字符 OTP/CSRF token 窃取完整攻击链与防御方案。
-- **CSS 外带 Payload 生成**: 新增 `css_exfil_payload` 工具，自动生成逐字符匹配的 CSS 属性选择器 payload，支持多种字符集（digits/hex/alphanumeric/extended）和 prefix/suffix 匹配模式。
-- **Webhook 数据还原**: 新增 `webhook_reconstruct` 工具，支持解析 webhook.site JSON / 原始 URL 列表 / 逐行日志等多种格式，自动还原逐字符泄露的 secret 值并标记每位置信度。
-- **System Prompt 增强**: 新增 CTF/利用场景工作流指引（步骤 12-17），覆盖"识别注入点 → CSP 分析 → 构造 Payload → 提交 Bot → 收集外带 → 还原 Secret → 拿 Flag"完整链路。
-- **工具集**: 现共 17 个注册工具（+2 个利用工具）。
+- CSS 注入知识库 + `css_exfil_payload` + `webhook_reconstruct`
+- 17 个注册工具 + CTF/利用场景工作流
 
-### v1.3.0 — 自进化技能系统 + 持久化 ⭐ 当前
-- **灵感来源**: Hermes Agent 的自进化架构（Skill 系统 + Curator + Background Review）。
-- **技能系统**: 新增 `SkillManager` + 5 个技能工具（`skill_list` / `skill_load` / `skill_create` / `skill_patch` / `scan_reflect`）。技能按漏洞类型分目录存储，兼容 agentskills.io 的 SKILL.md 格式（YAML frontmatter + Markdown 正文），含生命周期管理（active → stale → archived）。
-- **自反思循环**: 新增 §5 自进化工作流。每次扫描完成后 Agent 调用 `scan_reflect` 分析得失 → `skill_create` 将成功模式沉淀为技能 → 后续扫描中通过 `skill_load` 加载相关技能增强检测能力。
-- **种子技能**: 预置 `css-exfil-otp` 技能作为示例，Agent 可参考其格式创建新技能。
-- **SQLite 持久化**: 新增 `SessionDB`（FTS5 全文搜索 + WAL 模式），保存 scans / findings / events，支持历史回查和跨会话搜索。关闭浏览器后扫描结果不丢失。
-- **System Prompt**: 新增 §5 自进化工作流（步骤 18-21）。Agent 被指示在每次扫描后主动反思并沉淀技能。
-- **工具集**: 现共 22 个注册工具（+5 个技能/进化工具）。
+### v1.3.0 — 自进化技能系统 + 持久化
+- `SkillManager` + 5 个技能工具 + `SessionDB`（SQLite FTS5 + WAL）
+- 22 个注册工具
+
+### v1.4.0 — Shannon 迁移：全类别覆盖 ⭐ 当前
+- **12 个新工具**: SSRF 检测 (2) + 命令注入 + SSTI + JWT 主动攻击 (3) + 授权攻击 (3) + OOB 外带确认 (2)
+- **Payload 库**: 3 类别 9 个 → 19 类别 80+ 个（新增盲注/UNION/NoSQL/SSTI/命令注入/SSRF/XXE 等）
+- **知识库**: 4 → 8 文件（新增 SSRF/命令注入/认证授权/SSTI）
+- **前端**: 新增工具目录面板（📦 按钮），支持搜索和分类浏览
+- **API**: 新增 `/api/tools` 端点，返回完整工具清单和参数 Schema
+- **System Prompt**: 重写为 v1.4 全类别工作流（步骤 1-33）
+- **设计来源**: Shannon OSS（AI 白盒渗透测试引擎）的攻击模式，100% Python 原创实现
+- **工具总数**: 34
