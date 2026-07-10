@@ -1,8 +1,8 @@
 """
-FastAPI server for My Agent Web Security Scanner v0.7.
+FastAPI server for My Agent Web Security Scanner v0.9.
 
-v0.7 ships the LFI verifier and the v0.8-style structured browser UI while
-publishing the product version as 0.7.0, per release plan.
+v0.9 adds structured scanner-result envelopes to tool events while preserving
+the readable summaries used by the existing workbench.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from agent import Agent, AgentConfig
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.9.0"
 
 app = FastAPI(title="Web Security Scanner", version=APP_VERSION)
 app.add_middleware(
@@ -94,6 +94,7 @@ async def chat(ws: WebSocket):
                 if event.get("type") in {"tool_start", "tool_end"}:
                     event["input"] = _json_safe(event.get("input"))
                     event["output"] = _json_safe(event.get("output"))
+                    event["result"] = _json_safe(event.get("result"))
                 await send_json(event)
             await send_json({"type": "done"})
         except asyncio.CancelledError:

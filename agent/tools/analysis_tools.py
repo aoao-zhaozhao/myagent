@@ -126,7 +126,7 @@ def extract_links(url: str) -> str:
         url: 目标页面 URL
     """
     try:
-        r = requests.get(url, timeout=10, verify=False)
+        r = get(url)
         soup = BeautifulSoup(r.text, "html.parser")
         links = soup.find_all("a", href=True)
 

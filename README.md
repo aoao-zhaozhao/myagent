@@ -11,7 +11,7 @@ my-agent/
 ├── agent/
 │   ├── __init__.py             # 模块入口
 │   ├── config.py               # 配置管理 (AgentConfig)
-│   ├── prompts.py              # System Prompt (v0.8 工作流)
+│   ├── prompts.py              # System Prompt (v0.9 工作流)
 │   ├── agent.py                # Agent 核心引擎 (LangGraph)
 │   ├── rag.py                  # RAG 知识库 (Chroma + Qwen3 两阶段检索)
 │   ├── core.py                 # 向后兼容重导出
@@ -151,7 +151,7 @@ Web 工作台底部按钮：
 
 | 接口 | 方法 | 说明 |
 |---|---|---|
-| `/api/chat` | WebSocket | 核心对话——逐 token 流式输出扫描结果和工具事件；支持 `clear` / `stop` 命令 |
+| `/api/chat` | WebSocket | 核心对话——逐 token 流式输出扫描结果和工具事件；`tool_end` 附带结构化 `result`；支持 `clear` / `stop` 命令 |
 | `/api/config` | GET/PUT | 查看/修改配置 |
 | `/api/sessions` | GET | 活跃连接数 |
 | `/api/health` | GET | 健康检查 |
@@ -162,6 +162,7 @@ Web 工作台底部按钮：
 |---|---|
 | `http_get(url)` | GET 请求，获取页面内容和响应头 |
 | `http_post(url, data)` | POST 请求，发送测试 payload（XSS/SQLi） |
+| `http_request(method, url, data, headers_json)` | 发送受约束的 GET/POST/PUT/PATCH/HEAD/OPTIONS 请求；用于验证明确要求的 HTTP 方法 |
 | `analyze_headers(url)` | 检查安全头（CSP/HSTS/X-Frame-Options 等） |
 | `extract_forms(url)` | 提取页面所有表单和输入参数 |
 | `extract_links(url)` | 提取页面内链，扩展攻击面 |
@@ -239,9 +240,17 @@ Web 工作台底部按钮：
 - **工作台 UI**: 会话历史、阶段进度、Markdown 报告、工具卡片和风险摘录
 - **发布口径**: 原计划 v0.8 的核心 UI 能力合并到 v0.7 发布，tag 为 `v0.7`
 
-### v0.8 — CUDA RAG 加速 + 工作台稳定性 ⭐ 当前
+### v0.8 — CUDA RAG 加速 + 工作台稳定性
 - **CUDA 运行环境**: 验证 Windows + NVIDIA GPU 下 `torch 2.12.1+cu130`，`torch.cuda.is_available()` 正常返回 `True`
 - **RAG 自动设备选择**: Embedding 和 Reranker 统一使用 `cuda` / `cpu` 自动选择
 - **Reranker 显存控制**: GPU 下使用 `float16`、小批量推理和动态 padding，避免固定 8192 token padding 导致 12GB 显存 OOM
 - **前端布局修复**: 消息区独立滚动，输入栏固定在工作台底部，不再随对话增长被挤出视口
 - **会话历史设计澄清**: 当前为 `localStorage` 本地缓存，后续后端持久化将参考 transcript/SQLite 方案实现
+
+### v0.9 — 结构化证据协议 + 工具可靠性 ⭐ 当前
+- **统一结果协议**: 所有注册扫描工具返回可读摘要和 `ToolResult` JSON envelope，包含 `tool`、`target`、`status`、`summary`、`findings`、`errors`、`raw_excerpt`、请求/响应记录扩展字段
+- **事件透传**: `tool_end` 在保留原有 `output` 摘要的同时发送机器可读 `result`，前端工具卡片可查看结构化证据
+- **错误分类**: 超时、连接、解析、范围和工具故障以统一错误类型输出
+- **统一请求路径**: `extract_links` 改用 `http_client`，复用同源边界、超时、限速和重试策略
+- **HTTP 方法验证**: 新增 `http_request`，在源码或 `Allow` 响应头明确要求时可执行 PUT/PATCH 等受约束方法
+- **回归测试**: 新增 mock HTTP 测试，覆盖安全头、空表单、链接、超时、爬取和 LFI 基线失败

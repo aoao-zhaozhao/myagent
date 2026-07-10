@@ -19,6 +19,7 @@ from .config import AgentConfig
 from .prompts import SYSTEM_PROMPT
 from .rag import create_search_knowledge_tool
 from .tools import BASE_TOOLS
+from .tools.results import parse_tool_result
 
 
 class Agent:
@@ -108,11 +109,13 @@ class Agent:
                     "input": event.get("data", {}).get("input"),
                 }
             elif kind == "on_tool_end":
+                output, result = parse_tool_result(event.get("data", {}).get("output"))
                 yield {
                     "type": "tool_end",
                     "id": event.get("run_id"),
                     "name": event.get("name", "tool"),
-                    "output": self._summarize_tool_output(event.get("data", {}).get("output")),
+                    "output": self._summarize_tool_output(output),
+                    "result": result,
                 }
 
         response_text = "".join(full_response).strip()

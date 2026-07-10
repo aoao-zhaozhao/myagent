@@ -612,7 +612,7 @@ function renderToolHistory() {
 }
 
 function buildToolCard(tool) {
-  const state = tool.output ? 'done' : 'running';
+  const state = tool.output ? (tool.result?.status === 'error' ? 'stopped' : 'done') : 'running';
   const card = document.createElement('div');
   card.className = `tool-card ${state}`;
   card.dataset.id = tool.id;
@@ -626,6 +626,7 @@ function buildToolCard(tool) {
       <div class="tool-body">${escapeHtml(formatPayload(tool.input))}</div>
     </details>
     ${tool.output ? `<details open><summary>结果摘要</summary><div class="tool-body">${escapeHtml(tool.output)}</div></details>` : ''}
+    ${tool.result ? `<details><summary>结构化证据</summary><div class="tool-body">${escapeHtml(formatPayload(tool.result))}</div></details>` : ''}
   `;
   return card;
 }
@@ -645,7 +646,7 @@ function onToolStart(msg) {
     toolRail.className = '';
     toolRail.innerHTML = '';
   }
-  const tool = { id: msg.id || `${msg.name}-${Date.now()}`, name: msg.name, input: msg.input, output: '' };
+  const tool = { id: msg.id || `${msg.name}-${Date.now()}`, name: msg.name, input: msg.input, output: '', result: null };
   activeSession().tools.push(tool);
   saveSessions();
   const card = buildToolCard(tool);
@@ -659,21 +660,29 @@ function onToolEnd(msg) {
   const sessionTool = activeSession().tools.find(tool => tool.id === id);
   if (sessionTool) {
     sessionTool.output = msg.output || '';
+    sessionTool.result = msg.result || null;
     saveSessions();
   }
   const card = toolCards.get(id);
   if (card) {
-    card.className = 'tool-card done';
+    const failed = msg.result?.status === 'error';
+    card.className = `tool-card ${failed ? 'stopped' : 'done'}`;
     const badge = card.querySelector('.badge');
     if (badge) {
-      badge.className = 'badge done';
-      badge.textContent = '完成';
+      badge.className = `badge ${failed ? 'stopped' : 'done'}`;
+      badge.textContent = failed ? '失败' : '完成';
     }
     if (!card.querySelector('.result-details')) {
       const details = document.createElement('details');
       details.className = 'result-details';
       details.open = true;
       details.innerHTML = `<summary>结果摘要</summary><div class="tool-body">${escapeHtml(msg.output || '')}</div>`;
+      card.appendChild(details);
+    }
+    if (msg.result && !card.querySelector('.evidence-details')) {
+      const details = document.createElement('details');
+      details.className = 'evidence-details';
+      details.innerHTML = `<summary>结构化证据</summary><div class="tool-body">${escapeHtml(formatPayload(msg.result))}</div>`;
       card.appendChild(details);
     }
   }
