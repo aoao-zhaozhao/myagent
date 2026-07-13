@@ -17,6 +17,8 @@ from .scan_state import ScanState, target_from_input
 from .telemetry import TelemetryStore
 from .tools import BASE_TOOLS
 from .tools.results import parse_tool_result, tool_result_protocol_error
+from .tools.auth_session_tools import reset_auth_session_mode, set_auth_session_mode
+from .case_evidence import begin_case_evidence_gate, end_case_evidence_gate, record_verified_evidence
 
 
 class Agent:
@@ -240,6 +242,8 @@ class Agent:
 
         full_response: list[str] = []
         evolution_finalized = False
+        auth_session_token = set_auth_session_mode(mode)
+        case_evidence_token = begin_case_evidence_gate(scan.scan_id, scan.target)
         yield scan.started_event()
         try:
             async for event in self.agent.astream_events(
@@ -290,6 +294,7 @@ class Agent:
                     action_status = "protocol_error" if protocol_error else str(result.get("status", "ok"))
                     result_for_scan = result or {"status": "protocol_error"}
                     progress_event = scan.finish_tool(tool_name, run_id, result_for_scan)
+                    record_verified_evidence(tool_name, result)
                     if telemetry is not None:
                         telemetry.finish_action(
                             scan.scan_id,
@@ -377,6 +382,8 @@ class Agent:
                 telemetry.finish_run(scan.scan_id, "failed", response_text)
             raise
         finally:
+            reset_auth_session_mode(auth_session_token)
+            end_case_evidence_gate(case_evidence_token)
             if not evolution_finalized:
                 self._finalize_evolution()
             self._active_scan = None

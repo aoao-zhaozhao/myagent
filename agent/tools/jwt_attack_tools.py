@@ -24,7 +24,7 @@ JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?=[\s'
 
 # Common HMAC secrets for brute-force
 WEAK_HMAC_SECRETS = [
-    "secret", "password", "changeme", "key", "private", "jwt_secret",
+    "secret", "password", "changeme", "key", "private", "jwt_secret", "123",
     "super_secret", "my_secret", "default", "1234567890", "admin",
     "secretkey", "secret_key", "jwtkey", "signing_key", "hmac_secret",
     "test", "dev", "development", "QwErTy", "passw0rd",

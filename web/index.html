@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Web Security Scanner v1.7.2</title>
+<title>Web Security Scanner v1.7.3</title>
 <style>
   :root {
     --bg: #111311;
@@ -605,7 +605,7 @@
   }
   .input-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 42px 42px 42px;
+    grid-template-columns: 104px minmax(0, 1fr) 42px 42px 42px;
     gap: 9px;
   }
   #userInput {
@@ -639,6 +639,15 @@
     .topbar { align-items: flex-start; flex-direction: column; }
     .mobile-only { display: grid; }
   }
+  .scan-mode {
+    min-width: 0;
+    height: 42px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+    color: var(--soft);
+    padding: 0 8px;
+  }
   @media (max-width: 620px) {
     .conversation { padding: 12px; }
     .bubble { max-width: 100%; }
@@ -656,7 +665,7 @@
     <div class="brand">
       <div>
         <h1>Web Security Scanner</h1>
-        <div class="version">v1.7.2</div>
+        <div class="version">v1.7.3</div>
       </div>
         <div class="brand-actions">
           <button class="icon-btn" id="metricsBtn" title="运行指标与历史">&#128202;</button>
@@ -716,6 +725,10 @@
 
     <footer class="composer">
       <div class="input-row">
+        <select id="scanMode" class="scan-mode" aria-label="扫描模式">
+          <option value="production">生产审计</option>
+          <option value="benchmark">CTF / Benchmark</option>
+        </select>
         <textarea id="userInput" placeholder="https://example.com"></textarea>
         <button class="icon-btn" id="sendBtn" title="发送">▶</button>
         <button class="icon-btn" id="stopBtn" title="停止当前扫描" disabled>■</button>
@@ -844,6 +857,7 @@ const toolRail = document.getElementById('toolRail');
 const findingRail = document.getElementById('findingRail');
 const caseMemoryRail = document.getElementById('caseMemoryRail');
 const input = document.getElementById('userInput');
+const scanMode = document.getElementById('scanMode');
 const sendBtn = document.getElementById('sendBtn');
 const stopBtn = document.getElementById('stopBtn');
 const clearBtn = document.getElementById('clearBtn');
@@ -1722,7 +1736,7 @@ function send() {
   updateStages(null);
   setBusy(true);
   saveSessions();
-  ws.send(JSON.stringify({ content: text, conversation_id: session.id }));
+  ws.send(JSON.stringify({ content: text, conversation_id: session.id, mode: scanMode.value }));
 }
 
 function stopScan() {
@@ -1763,7 +1777,7 @@ function exportActiveSession() {
   const session = activeSession();
   const payload = {
     exported_at: new Date().toISOString(),
-    format: 'my-agent-scan-v1.7.2',
+    format: 'my-agent-scan-v1.7.3',
     session
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });

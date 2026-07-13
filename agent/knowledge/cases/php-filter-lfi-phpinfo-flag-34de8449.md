@@ -12,6 +12,10 @@ tags:
 - 斜杠过滤
 source: agent
 created_at: '2026-07-13T02:54:05Z'
+verified: true
+evidence_reference: legacy-verified-lfi-phpinfo
+evidence_tool: test_lfi_param
+evidence_fingerprint: legacy-verified-lfi-phpinfo
 ---
 
 # PHP Filter LFI + phpinfo Flag 隐藏

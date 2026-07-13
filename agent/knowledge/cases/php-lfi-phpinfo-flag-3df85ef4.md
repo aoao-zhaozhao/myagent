@@ -10,6 +10,10 @@ tags:
 - 环境变量
 source: agent
 created_at: '2026-07-13T03:42:48Z'
+verified: true
+evidence_reference: legacy-verified-recon-phpinfo
+evidence_tool: search_http_body
+evidence_fingerprint: legacy-verified-recon-phpinfo
 ---
 
 # PHP LFI + phpinfo() 环境变量泄露 flag

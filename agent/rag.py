@@ -15,6 +15,7 @@ import hashlib
 import re
 from pathlib import Path
 
+import yaml
 from langchain_core.tools import tool
 
 
@@ -98,6 +99,13 @@ class RAGManager:
                     for meta in indexed if isinstance(meta, dict)
                 }
                 md_files = self._knowledge_files()
+                active_sources = {self._source_name(path) for path in md_files}
+                stale_case_sources = {
+                    source for source in existing_hashes
+                    if source.startswith("cases/") and source not in active_sources
+                }
+                for source in stale_case_sources:
+                    self._collection.delete(where={"source": source})
                 changed_files = [
                     path for path in md_files
                     if existing_hashes.get(self._source_name(path)) != self._source_hash(path)
@@ -166,7 +174,22 @@ class RAGManager:
     # ── Document indexing ──────────────────────────
 
     def _knowledge_files(self) -> list[Path]:
-        return sorted(self.knowledge_dir.rglob("*.md"))
+        files: list[Path] = []
+        for path in sorted(self.knowledge_dir.rglob("*.md")):
+            if "cases" not in path.parts:
+                files.append(path)
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+                if not text.startswith("---\n"):
+                    continue
+                closing = text.find("\n---\n", 4)
+                metadata = yaml.safe_load(text[4:closing]) if closing > 0 else {}
+                if isinstance(metadata, dict) and metadata.get("verified") is True:
+                    files.append(path)
+            except (OSError, yaml.YAMLError):
+                continue
+        return files
 
     def _source_name(self, path: Path) -> str:
         return path.relative_to(self.knowledge_dir).as_posix()

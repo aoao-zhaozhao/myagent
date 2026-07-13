@@ -1,4 +1,4 @@
-"""FastAPI server for WebSec Research Agent v1.7.2."""
+"""FastAPI server for WebSec Research Agent v1.7.3."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from agent.telemetry import TelemetryStore
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-APP_VERSION = "1.7.2"
+APP_VERSION = "1.7.3"
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -281,7 +281,7 @@ async def get_skills():
 def _categorize_tool(name: str, desc: str) -> str:
     """Assign a tool to a UI category."""
     lower = (name + " " + desc).lower()
-    if any(kw in name for kw in ("http_get", "http_post", "http_request", "search_http_body")):
+    if any(kw in name for kw in ("http_get", "http_post", "http_request", "search_http_body", "auth_login")):
         return "HTTP 基础"
     if any(kw in name for kw in ("crawl", "sitemap", "batch_scan", "extract_forms", "extract_links",
                                    "analyze_js", "discover_api", "render_page", "search_rendered_dom", "analyze_headers")):
@@ -291,7 +291,7 @@ def _categorize_tool(name: str, desc: str) -> str:
         return "注入验证"
     if any(kw in name for kw in ("test_ssrf", "probe_internal_port")):
         return "SSRF 检测"
-    if any(kw in name for kw in ("jwt_alg", "jwt_hmac", "jwt_key")):
+    if any(kw in name for kw in ("jwt_alg", "jwt_hmac", "jwt_key", "session_jwt")):
         return "JWT 攻击"
     if any(kw in name for kw in ("test_idor", "test_privilege", "test_role_manipulation")):
         return "授权攻击"
