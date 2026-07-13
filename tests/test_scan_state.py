@@ -170,6 +170,46 @@ class AgentModelConfigurationTests(unittest.TestCase):
         self.assertEqual(kwargs["temperature"], 0.3)
         self.assertEqual(kwargs["extra_body"], {"thinking": {"type": "disabled"}})
 
+    def test_model_usage_maps_deepseek_prompt_cache_hit_tokens(self):
+        agent = self.make_agent(input_cost_per_million_tokens=None, output_cost_per_million_tokens=None)
+        agent.telemetry = TelemetryStore(":memory:")
+        self.addCleanup(agent.telemetry.close)
+        agent.telemetry.create_run(
+            "run-cache", input_text="scan", target="http://scanner.test", mode="benchmark",
+            category="web", model="deepseek-v4-flash",
+        )
+        output = SimpleNamespace(usage_metadata={
+            "prompt_tokens": 100,
+            "completion_tokens": 25,
+            "prompt_cache_hit_tokens": 60,
+            "prompt_cache_miss_tokens": 40,
+        }, response_metadata={})
+
+        agent._record_model_usage("run-cache", output)
+
+        usage = agent.telemetry.get_run("run-cache")["model_usage"][0]
+        self.assertEqual(usage["input_tokens"], 100)
+        self.assertEqual(usage["cached_tokens"], 60)
+
+    def test_model_usage_maps_langchain_cache_read_detail(self):
+        agent = self.make_agent(input_cost_per_million_tokens=None, output_cost_per_million_tokens=None)
+        agent.telemetry = TelemetryStore(":memory:")
+        self.addCleanup(agent.telemetry.close)
+        agent.telemetry.create_run(
+            "run-cache-read", input_text="scan", target="http://scanner.test", mode="benchmark",
+            category="web", model="deepseek-v4-flash",
+        )
+        output = SimpleNamespace(usage_metadata={
+            "input_tokens": 100,
+            "output_tokens": 25,
+            "input_token_details": {"cache_read": 60},
+        }, response_metadata={})
+
+        agent._record_model_usage("run-cache-read", output)
+
+        usage = agent.telemetry.get_run("run-cache-read")["model_usage"][0]
+        self.assertEqual(usage["cached_tokens"], 60)
+
     def test_history_trim_preserves_system_prompt_and_recent_messages(self):
         agent = self.make_agent()
         agent.messages = [SystemMessage(content="system")] + [

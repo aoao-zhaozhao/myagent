@@ -169,6 +169,7 @@ class TelemetryStore:
             "CREATE INDEX IF NOT EXISTS idx_telemetry_runs_conversation ON telemetry_runs(conversation_id, started_at DESC)"
         )
         self._redact_existing_records()
+        self._backfill_cached_tokens()
         self._conn.commit()
 
     def _redact_existing_records(self) -> None:
@@ -189,6 +190,38 @@ class TelemetryStore:
                         f"UPDATE {table} SET {assignments} WHERE rowid=?",
                         (*changed.values(), row["rowid"]),
                     )
+
+    def _backfill_cached_tokens(self) -> None:
+        """Recover cache reads recorded before the provider field was mapped."""
+        rows = self._conn.execute(
+            "SELECT id, raw_usage FROM telemetry_model_usage WHERE cached_tokens=0"
+        ).fetchall()
+        for row in rows:
+            try:
+                usage = json.loads(row["raw_usage"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(usage, dict):
+                continue
+            details = usage.get("input_token_details") or usage.get("prompt_tokens_details") or {}
+            if not isinstance(details, dict):
+                details = {}
+            cached_tokens = usage.get(
+                "cached_tokens",
+                usage.get(
+                    "prompt_cache_hit_tokens",
+                    details.get("cached_tokens", details.get("cache_read", 0)),
+                ),
+            )
+            try:
+                cached_tokens = max(0, int(cached_tokens or 0))
+            except (TypeError, ValueError):
+                continue
+            if cached_tokens:
+                self._conn.execute(
+                    "UPDATE telemetry_model_usage SET cached_tokens=? WHERE id=?",
+                    (cached_tokens, row["id"]),
+                )
 
     def create_conversation(self, title: str = "新扫描", conversation_id: str | None = None) -> dict[str, Any]:
         conversation_id = conversation_id or str(uuid.uuid4())
@@ -597,6 +630,11 @@ class TelemetryStore:
                 "input_tokens": int(usage["input_tokens"]),
                 "output_tokens": int(usage["output_tokens"]),
                 "cached_tokens": int(usage["cached_tokens"]),
+                "cache_hit_rate": (
+                    int(usage["cached_tokens"]) / int(usage["input_tokens"])
+                    if int(usage["input_tokens"]) > 0
+                    else None
+                ),
                 "cost_usd": float(usage["cost_usd"]) if usage["priced_records"] else None,
                 "priced_records": int(usage["priced_records"]),
             },

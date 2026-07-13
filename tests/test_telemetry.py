@@ -91,7 +91,24 @@ class TelemetryStoreTests(unittest.TestCase):
         usage = self.store.metrics()["model_usage"]
         self.assertEqual(usage["input_tokens"], 120)
         self.assertEqual(usage["output_tokens"], 30)
+        self.assertEqual(usage["cached_tokens"], 20)
+        self.assertEqual(usage["cache_hit_rate"], 20 / 120)
         self.assertEqual(usage["cost_usd"], None)
+
+    def test_store_backfills_langchain_cache_read_from_historical_usage(self):
+        self._create_run("run-backfill")
+        self.store.record_model_usage(
+            "run-backfill", model="test-model", input_tokens=100, output_tokens=20,
+            cached_tokens=0, cost_usd=None,
+            raw_usage={"input_token_details": {"cache_read": 80}},
+        )
+
+        self.store.close()
+        self.store = TelemetryStore(self.db_path)
+
+        usage = self.store.metrics()["model_usage"]
+        self.assertEqual(usage["cached_tokens"], 80)
+        self.assertEqual(usage["cache_hit_rate"], 0.8)
 
     def test_conversation_survives_store_reopen_and_links_runs(self):
         conversation = self.store.create_conversation("Authorized review")

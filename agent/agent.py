@@ -181,8 +181,20 @@ class Agent:
         output_tokens = int(usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0)
         details = usage.get("input_token_details") or usage.get("prompt_tokens_details") or {}
         cached_tokens = int(
-            usage.get("cached_tokens", details.get("cached_tokens", 0)) or 0
+            usage.get(
+                "cached_tokens",
+                usage.get(
+                    "prompt_cache_hit_tokens",
+                    details.get("cached_tokens", details.get("cache_read", 0)),
+                ),
+            )
+            or 0
         )
+        # DeepSeek reports cache hits separately from prompt_tokens. Use its
+        # hit/miss fields as a fallback when an OpenAI-compatible wrapper
+        # omits the combined prompt token count.
+        if not input_tokens:
+            input_tokens = cached_tokens + int(usage.get("prompt_cache_miss_tokens", 0) or 0)
         input_rate = self.config.input_cost_per_million_tokens
         output_rate = self.config.output_cost_per_million_tokens
         cost_usd = None

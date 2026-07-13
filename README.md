@@ -8,6 +8,8 @@
 >
 > **v1.6** 新增案例记忆库、递归增量 RAG 索引和 `case_create`；DeepSeek curator 审查 agent-created Skill 的语义重复性；Skill 创建需要至少两条同类案例支持，避免“一题一 Skill”的知识库膨胀。
 >
+> **v1.7.4** 新增 DeepSeek 上下文缓存观测：将 `prompt_cache_hit_tokens` 及 LangChain 归一化的 `input_token_details.cache_read` 持久化为缓存命中 token；指标工作台按输入 token 加权显示缓存命中率，并自动回填已有遥测记录。
+>
 > **v1.7.3** 新增认证会话与 JWT 验证闭环：登录重定向、Cookie 和 JWT 保存在内存 `session_ref` 中，Agent 只接收脱敏元数据；Benchmark 模式可验证弱签名造成的权限风险。案例写入新增运行时证据门与指纹去重，未验证扫描不会进入 RAG 或 Skill 晋升。
 >
 ## 项目结构
@@ -186,7 +188,7 @@ Agent 覆盖 10 大攻击类别，45 个工具自动协作：
 | `/api/tools` | GET | 工具目录——返回 45 个工具按类别分组，含名称、描述、参数 Schema |
 | `/api/skills` | GET | 返回已学习 Skill 的生命周期状态、标签和使用遥测，供工具目录动态展示 |
 | `/api/evolution` | GET | 查看工具计数、review job、待处理指令和近期审查报告 |
-| `/api/metrics` | GET | 查看运行数、工具/协议失败率、首次有效行动比例、solve rate 与 token 用量 |
+| `/api/metrics` | GET | 查看运行数、工具/协议失败率、首次有效行动比例、solve rate、输入/输出 token 与缓存命中率 |
 | `/api/runs` | GET | 查看持久化运行记录；`/api/runs/{id}` 查看行动、usage 与评测详情 |
 | `/api/runs/{id}/evaluation` | POST | 写入本地 benchmark 或人工判定的评测结果 |
 | `/api/sessions` | GET | 活跃连接数 |
@@ -390,7 +392,13 @@ Agent 覆盖 10 大攻击类别，45 个工具自动协作：
 - `skill_create` 强制要求至少两条同分类且标签重叠的独立案例，阻止单题经验污染 Skill 库
 - 新增 `/api/skills`，工具目录动态展示已学习 Skill；基础工具总数为 39
 
-### v1.7.3 — 认证会话与 JWT 验证闭环（当前）
+### v1.7.4 — DeepSeek 缓存命中率（当前）
+
+- 兼容 DeepSeek 原始 `prompt_cache_hit_tokens` 和 LangChain 归一化的 `input_token_details.cache_read`。
+- `telemetry_model_usage` 持久化缓存命中 token；启动时从历史 `raw_usage` 幂等回填此前遗漏的缓存读数。
+- `/api/metrics` 以 `cached_tokens / input_tokens` 返回加权缓存命中率；工作台在总览、能力域和单次运行详情展示该比例。
+
+### v1.7.3 — 认证会话与 JWT 验证闭环
 
 - `auth_login` 保留登录重定向和 Cookie 于内存会话，使用 `session_ref` 关联后续检查，不写入 token 或密码。
 - `session_jwt_review`、`session_jwt_hmac_check` 分析 JWT 元数据与固定弱密钥；仅 Benchmark 模式允许权限差异验证。

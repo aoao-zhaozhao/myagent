@@ -665,7 +665,7 @@
     <div class="brand">
       <div>
         <h1>Web Security Scanner</h1>
-        <div class="version">v1.7.3</div>
+        <div class="version">v1.7.4</div>
       </div>
         <div class="brand-actions">
           <button class="icon-btn" id="metricsBtn" title="运行指标与历史">&#128202;</button>
@@ -1373,7 +1373,8 @@ function renderMetrics(data) {
     metricItem(formatRate(actions.protocol_failure_rate), '协议失败率', `${actions.protocol_failures || 0} / ${actions.total || 0}`),
     metricItem(formatRate(first.rate), '首次有效行动', `${first.effective || 0} / ${first.attempts || 0}`),
     metricItem(formatRate(solve.rate), '已验证 solve', `${solve.solved || 0} / ${solve.evaluated || 0}`),
-    metricItem(formatTokens(usage.input_tokens) + ' / ' + formatTokens(usage.output_tokens), '输入 / 输出 token', `成本 ${formatCost(usage.cost_usd)}`)
+    metricItem(formatTokens(usage.input_tokens) + ' / ' + formatTokens(usage.output_tokens), '输入 / 输出 token', `成本 ${formatCost(usage.cost_usd)}`),
+    metricItem(formatRate(usage.cache_hit_rate), '缓存命中率', `${formatTokens(usage.cached_tokens)} / ${formatTokens(usage.input_tokens)} 输入 token`)
   ].join('');
 
   const categories = Object.entries(data?.by_category || {});
@@ -1383,13 +1384,13 @@ function renderMetrics(data) {
     return;
   }
   metricsCategories.className = 'metrics-table-wrap';
-  metricsCategories.innerHTML = `<table class="metrics-table"><thead><tr><th>能力域</th><th>运行</th><th>工具失败</th><th>首次有效</th><th>solve</th><th>Token</th></tr></thead><tbody>${categories.map(([name, item]) => {
+  metricsCategories.innerHTML = `<table class="metrics-table"><thead><tr><th>能力域</th><th>运行</th><th>工具失败</th><th>首次有效</th><th>solve</th><th>Token</th><th>缓存命中</th></tr></thead><tbody>${categories.map(([name, item]) => {
     const categoryRuns = item.runs || {};
     const categoryActions = item.actions || {};
     const categoryFirst = item.first_effective_action || {};
     const categorySolve = item.solve_rate || {};
     const categoryUsage = item.model_usage || {};
-    return `<tr><td>${escapeHtml(name)}</td><td>${categoryRuns.completed || 0}/${categoryRuns.total || 0}</td><td>${formatRate(categoryActions.tool_failure_rate)}</td><td>${formatRate(categoryFirst.rate)}</td><td>${formatRate(categorySolve.rate)}</td><td>${formatTokens(categoryUsage.input_tokens + categoryUsage.output_tokens)}</td></tr>`;
+    return `<tr><td>${escapeHtml(name)}</td><td>${categoryRuns.completed || 0}/${categoryRuns.total || 0}</td><td>${formatRate(categoryActions.tool_failure_rate)}</td><td>${formatRate(categoryFirst.rate)}</td><td>${formatRate(categorySolve.rate)}</td><td>${formatTokens(categoryUsage.input_tokens + categoryUsage.output_tokens)}</td><td>${formatRate(categoryUsage.cache_hit_rate)}</td></tr>`;
   }).join('')}</tbody></table>`;
 }
 
@@ -1416,12 +1417,14 @@ function renderRunDetail(run) {
   const usage = Array.isArray(run.model_usage) ? run.model_usage : [];
   const inputTokens = usage.reduce((sum, item) => sum + Number(item.input_tokens || 0), 0);
   const outputTokens = usage.reduce((sum, item) => sum + Number(item.output_tokens || 0), 0);
+  const cachedTokens = usage.reduce((sum, item) => sum + Number(item.cached_tokens || 0), 0);
+  const cacheHitRate = inputTokens ? cachedTokens / inputTokens : null;
   const evaluation = run.evaluation;
   runDetail.className = 'metrics-detail';
   runDetail.innerHTML = `
     <div class="metrics-detail-head"><span>${escapeHtml(run.category || 'web')} · ${escapeHtml(run.mode || 'production')}</span><span>${escapeHtml(run.status || 'unknown')}</span></div>
     <div class="run-meta">${escapeHtml(run.target || run.input_text || '')}</div>
-    <div class="run-meta">${actions.length} 个行动 · ${formatTokens(inputTokens)} / ${formatTokens(outputTokens)} token${evaluation ? ` · ${escapeHtml(evaluation.outcome)}${evaluation.verified ? '（已验证）' : ''}` : ''}</div>
+    <div class="run-meta">${actions.length} 个行动 · ${formatTokens(inputTokens)} / ${formatTokens(outputTokens)} token · 缓存命中 ${formatRate(cacheHitRate)}（${formatTokens(cachedTokens)} / ${formatTokens(inputTokens)}）${evaluation ? ` · ${escapeHtml(evaluation.outcome)}${evaluation.verified ? '（已验证）' : ''}` : ''}</div>
     ${actions.length ? actions.map(action => `
       <div class="action-row">
         <div class="action-row-head"><span>${escapeHtml(action.tool_name)}</span><span>${escapeHtml(action.status)}${action.duration_ms != null ? ` · ${formatDuration(action.duration_ms)}` : ''}</span></div>
