@@ -133,6 +133,13 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(self.store.import_conversations(sessions), 0)
         self.assertEqual(self.store.get_conversation("legacy-1")["messages"][0]["content"], "api_key=[REDACTED]")
 
+    def test_telemetry_redacts_ctf_flags(self):
+        self.store.create_run(
+            "run-flag", input_text="flag is wctf{private-value}", target="http://scanner.test",
+            mode="production", category="web", model="test-model",
+        )
+        self.assertEqual(self.store.get_run("run-flag")["input_text"], "flag is [REDACTED]")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Web Security Scanner v1.7.1</title>
+<title>Web Security Scanner v1.7.2</title>
 <style>
   :root {
     --bg: #111311;
@@ -212,6 +212,15 @@
     color: var(--soft);
   }
   .rail-section + .rail-section { margin-top: 18px; }
+  .case-memory-item {
+    border-left: 3px solid var(--green);
+    background: #121512;
+    padding: 8px;
+    font: 12px "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+    overflow-wrap: anywhere;
+  }
+  .case-memory-item + .case-memory-item { margin-top: 6px; }
+  .case-memory-meta { color: var(--muted); font: 11px system-ui, sans-serif; margin-top: 4px; }
   .scan-summary {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -647,11 +656,11 @@
     <div class="brand">
       <div>
         <h1>Web Security Scanner</h1>
-        <div class="version">v1.7.1</div>
+        <div class="version">v1.7.2</div>
       </div>
         <div class="brand-actions">
           <button class="icon-btn" id="metricsBtn" title="运行指标与历史">&#128202;</button>
-        <button class="icon-btn" id="toolsBtn" title="工具目录 (38)">📦</button>
+        <button class="icon-btn" id="toolsBtn" title="工具目录">📦</button>
         <button class="icon-btn" id="settingsBtn" title="模型与思考设置">⚙</button>
         <button class="icon-btn" id="newSessionBtn" title="新建会话">+</button>
       </div>
@@ -693,6 +702,10 @@
         <section class="rail-section">
           <h2>漏洞证据</h2>
           <div id="findingRail" class="empty">等待结构化发现。</div>
+        </section>
+        <section class="rail-section">
+          <h2>案例记忆</h2>
+          <div id="caseMemoryRail" class="empty">本次扫描尚未保存案例。</div>
         </section>
         <section class="rail-section">
           <h2>工具轨迹</h2>
@@ -829,6 +842,7 @@ const conversation = document.getElementById('conversation');
 const sessionsEl = document.getElementById('sessions');
 const toolRail = document.getElementById('toolRail');
 const findingRail = document.getElementById('findingRail');
+const caseMemoryRail = document.getElementById('caseMemoryRail');
 const input = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 const stopBtn = document.getElementById('stopBtn');
@@ -894,6 +908,10 @@ function saveSessions() {
 
 function sessionFromServer(session) {
   const runs = Array.isArray(session.runs) ? session.runs : [];
+  const caseMemories = runs.flatMap(run => (run.actions || [])
+    .filter(action => action.tool_name === 'case_create' && action.result_data?.status === 'ok')
+    .map(action => action.result_data?.data || {})
+    .filter(item => item.id));
   return {
     ...session,
     createdAt: Date.parse(session.created_at || '') || Date.now(),
@@ -912,6 +930,7 @@ function sessionFromServer(session) {
       startedAt: Date.parse(action.started_at || '') || Date.now(),
       finishedAt: Date.parse(action.finished_at || '') || null
     }))),
+    caseMemories,
     scan: null
   };
 }
@@ -937,7 +956,7 @@ async function persistSessionTitle(session) {
 function activeSession() {
   let session = sessions.find(item => item.id === activeId);
   if (!session) {
-    session = { id: '', title: '新扫描', messages: [], tools: [], scan: null };
+    session = { id: '', title: '新扫描', messages: [], tools: [], caseMemories: [], scan: null };
   }
   return session;
 }
@@ -1115,6 +1134,7 @@ function renderConversation() {
   }
   renderToolHistory();
   renderFindingCards(session.scan?.findings || []);
+  renderCaseMemory();
   renderScanState(session.scan);
   updateStages(session.scan);
 }
@@ -1278,6 +1298,31 @@ function formatDuration(milliseconds) {
   const seconds = Math.max(0, Math.floor((milliseconds || 0) / 1000));
   const minutes = Math.floor(seconds / 60);
   return minutes ? `${minutes}m ${String(seconds % 60).padStart(2, '0')}s` : `${seconds}s`;
+}
+
+function renderCaseMemory() {
+  const cases = activeSession().caseMemories || [];
+  if (!cases.length) {
+    caseMemoryRail.className = 'empty';
+    caseMemoryRail.textContent = '本次扫描尚未保存案例。';
+    return;
+  }
+  caseMemoryRail.className = '';
+  caseMemoryRail.innerHTML = cases.map(item => `
+    <div class="case-memory-item">
+      已保存：${escapeHtml(item.id)}
+      <div class="case-memory-meta">${escapeHtml((item.tags || []).join(' · ') || '无标签')}</div>
+    </div>
+  `).join('');
+}
+
+function onCaseSaved(msg) {
+  const item = msg.case || {};
+  if (!item.id) return;
+  const cases = activeSession().caseMemories || (activeSession().caseMemories = []);
+  if (!cases.some(existing => existing.id === item.id)) cases.unshift(item);
+  renderCaseMemory();
+  saveSessions();
 }
 
 function formatRate(value) {
@@ -1618,6 +1663,8 @@ function connect() {
         onToolStart(msg);
       } else if (msg.type === 'tool_finished') {
         onToolEnd(msg);
+      } else if (msg.type === 'case_saved') {
+        onCaseSaved(msg);
       } else if (msg.type === 'done') {
         if (currentAssistantRaw) {
           activeSession().messages.push({ role: 'assistant', content: currentAssistantRaw, at: Date.now() });
@@ -1716,7 +1763,7 @@ function exportActiveSession() {
   const session = activeSession();
   const payload = {
     exported_at: new Date().toISOString(),
-    format: 'my-agent-scan-v1.7.1',
+    format: 'my-agent-scan-v1.7.2',
     session
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });

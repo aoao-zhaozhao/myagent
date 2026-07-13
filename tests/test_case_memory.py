@@ -53,6 +53,9 @@ class CaseMemoryTests(unittest.TestCase):
         rag = RAGManager(config)
         self.assertEqual(rag._source_name(case_path), "cases/example.md")
         self.assertEqual(rag._knowledge_files(), [case_path])
+        initial_hash = rag._source_hash(case_path)
+        case_path.write_text("# Case\n\n## Summary\n\nUpdated", encoding="utf-8")
+        self.assertNotEqual(initial_hash, rag._source_hash(case_path))
 
     def test_case_similarity_requires_matching_category_and_tags(self):
         manager = CaseManager(self.root / "knowledge" / "cases")
@@ -69,6 +72,23 @@ class CaseMemoryTests(unittest.TestCase):
 
         self.assertEqual(manager.count_similar("general", ["php"]), 2)
         self.assertEqual(manager.count_similar("auth", ["php"]), 0)
+
+    def test_case_manager_redacts_flags_and_credentials_before_writing(self):
+        manager = CaseManager(self.root / "knowledge" / "cases")
+        record = manager.create(
+            title="CTF flag wctf{should-not-persist}",
+            target="http://authorized.test/?api_key=private-value",
+            summary="The flag is wctf{should-not-persist}.",
+            evidence="Authorization: Bearer private-token",
+            solution="password=private-value must not be retained.",
+            category="general",
+        )
+
+        document = Path(str(record["path"])).read_text(encoding="utf-8")
+        self.assertNotIn("should-not-persist", document)
+        self.assertNotIn("private-token", document)
+        self.assertNotIn("private-value", document)
+        self.assertIn("[REDACTED]", document)
 
     def test_archive_handles_missing_agent_skill_document(self):
         store = EvolutionStore(self.root / "evolution.db")

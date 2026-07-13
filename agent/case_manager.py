@@ -12,6 +12,21 @@ import yaml
 from .evolution.store import now_iso
 
 
+_CASE_SECRET_PATTERNS = (
+    re.compile(r"(?i)\b(?:[a-z0-9_-]*(?:ctf|flag)|flag)\{[^}\r\n]{1,512}\}"),
+    re.compile(r"(?i)(bearer\s+)[^\s,;]+"),
+    re.compile(r"(?i)((?:api[_-]?key|token|password|passwd|secret)\s*[=:]\s*)[^\s&;,]+"),
+)
+
+
+def redact_case_text(value: str) -> str:
+    """Keep reusable technique details while removing secrets from case memory."""
+    text = str(value)
+    for pattern in _CASE_SECRET_PATTERNS:
+        text = pattern.sub(lambda match: match.group(1) + "[REDACTED]" if match.lastindex else "[REDACTED]", text)
+    return text
+
+
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
     return slug[:56] or "case"
@@ -39,28 +54,30 @@ class CaseManager:
         tags: list[str] | None = None,
         source: str = "agent",
     ) -> dict[str, str | list[str]]:
-        case_id = f"{_slugify(title)}-{uuid.uuid4().hex[:8]}"
+        safe_title = redact_case_text(title).strip()[:200]
+        case_id = f"{_slugify(safe_title)}-{uuid.uuid4().hex[:8]}"
         path = self.root / f"{case_id}.md"
+        safe_tags = [redact_case_text(tag).strip()[:64] for tag in (tags or []) if tag.strip()]
         metadata = {
             "id": case_id,
-            "title": title.strip()[:200],
-            "target": target.strip()[:500],
+            "title": safe_title,
+            "target": redact_case_text(target).strip()[:500],
             "category": category.strip().lower()[:64] or "general",
-            "tags": sorted({tag.strip()[:64] for tag in (tags or []) if tag.strip()}),
+            "tags": sorted(set(safe_tags)),
             "source": source,
             "created_at": now_iso(),
         }
         sections = [
             f"# {metadata['title']}",
             "## Summary",
-            summary.strip(),
+            redact_case_text(summary).strip(),
             "## Evidence",
-            evidence.strip(),
+            redact_case_text(evidence).strip(),
             "## Resolution",
-            solution.strip(),
+            redact_case_text(solution).strip(),
         ]
         if failed_attempts.strip():
-            sections.extend(["## Failed Attempts", failed_attempts.strip()])
+            sections.extend(["## Failed Attempts", redact_case_text(failed_attempts).strip()])
         content = f"---\n{yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False).strip()}\n---\n\n" + "\n\n".join(sections) + "\n"
         path.write_text(content, encoding="utf-8")
         return {"id": case_id, "path": str(path), "tags": metadata["tags"]}

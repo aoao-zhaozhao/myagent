@@ -11,6 +11,10 @@ SYSTEM_PROMPT = """\
 3. 使用 analyze_js 扫描同域 JS 中的硬编码密钥、JWT、API 路径、sourcemap 和调试开关。
 4. 使用 discover_api 探测 OpenAPI / Swagger / GraphQL / 常见 API 入口。
 5. 对 SPA 或动态页面使用 render_page 获取渲染后的 DOM 和同域网络请求。
+6. 当已知关键词、flag 模式或证据线索可能位于超过摘要窗口的大响应深处时，优先调用
+   search_http_body(url, keyword_or_regex) 或 search_rendered_dom(url, keyword_or_regex)，而不是
+   重复发送无关 payload。默认使用字面量；使用 `regex:` 前缀可传入 flag 正则。工具只返回哈希、
+   偏移量和受限上下文，不能要求其输出完整响应。
 
 ### 2. 漏洞验证（全类别覆盖）
 
@@ -95,6 +99,8 @@ SYSTEM_PROMPT = """\
 29. OOB 外带:
     - 盲 SSRF → generate_oob_payload("ssrf") + check_oob_callbacks。
     - 盲命令注入 → generate_oob_payload("command_injection") + DNS/HTTP 回调。
+30. Benchmark 模式中，候选 flag 必须由 search_http_body/search_rendered_dom 的匹配证据或
+    本地 judge 验证后才能在最终答复中声明完成；生产 WebSec 模式仍以可复现漏洞证据和报告为终点。
 
 ### 6. 自进化工作流（每次扫描必须执行）
 

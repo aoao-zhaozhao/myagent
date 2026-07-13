@@ -312,6 +312,23 @@ class Agent:
                         "result": result,
                         "protocol_error": protocol_error,
                     }
+                    if tool_name == "case_create" and result and result.get("status") == "ok":
+                        case_data = result.get("data", {})
+                        case_id = str(case_data.get("id", "案例"))
+                        notice = f"\n\n案例已保存并已加入知识库：{case_id}。"
+                        full_response.append(notice)
+                        if telemetry is not None:
+                            telemetry.update_run_summary(scan.scan_id, "".join(full_response))
+                        yield {"type": "token", "scan_id": scan.scan_id, "content": notice}
+                        yield {
+                            "type": "case_saved",
+                            "scan_id": scan.scan_id,
+                            "case": {
+                                "id": case_id,
+                                "path": str(case_data.get("path", "")),
+                                "tags": case_data.get("tags", []),
+                            },
+                        }
                     yield progress_event
                     for finding_event in scan.finding_events(tool_name, result):
                         yield finding_event

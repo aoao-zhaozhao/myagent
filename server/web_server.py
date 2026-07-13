@@ -1,4 +1,4 @@
-"""FastAPI server for WebSec Research Agent v1.7.1."""
+"""FastAPI server for WebSec Research Agent v1.7.2."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from agent.telemetry import TelemetryStore
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-APP_VERSION = "1.7.1"
+APP_VERSION = "1.7.2"
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -281,10 +281,10 @@ async def get_skills():
 def _categorize_tool(name: str, desc: str) -> str:
     """Assign a tool to a UI category."""
     lower = (name + " " + desc).lower()
-    if any(kw in name for kw in ("http_get", "http_post", "http_request")):
+    if any(kw in name for kw in ("http_get", "http_post", "http_request", "search_http_body")):
         return "HTTP 基础"
     if any(kw in name for kw in ("crawl", "sitemap", "batch_scan", "extract_forms", "extract_links",
-                                  "analyze_js", "discover_api", "render_page", "analyze_headers")):
+                                   "analyze_js", "discover_api", "render_page", "search_rendered_dom", "analyze_headers")):
         return "攻击面测绘"
     if any(kw in name for kw in ("verify_injection", "test_lfi_param", "test_command_injection",
                                   "test_ssti", "decode_jwt")):

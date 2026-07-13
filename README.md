@@ -1,16 +1,14 @@
 # WebSec Research Agent — Web 漏洞审查引擎
 
-基于 DeepSeek + LangGraph 的 Web 应用安全扫描 Agent。覆盖 **SQLi / XSS / 命令注入 / SSTI / LFI / SSRF / JWT 攻击 / IDOR / 提权 / OOB 外带确认** 共 10 大攻击类别，39 个注册工具，80+ 内置 payload。通过 FastAPI + WebSocket 提供可观察的扫描阶段、实时工具轨迹、漏洞证据和运行指标工作台。v1.6 引入“案例优先、技能晋升制”；v1.7 增加可持久化、可复算的运行遥测。
+基于 DeepSeek + LangGraph 的 Web 应用安全扫描 Agent。覆盖 **SQLi / XSS / 命令注入 / SSTI / LFI / SSRF / JWT 攻击 / IDOR / 提权 / OOB 外带确认** 共 10 大攻击类别，41 个注册工具，80+ 内置 payload。通过 FastAPI + WebSocket 提供可观察的扫描阶段、实时工具轨迹、漏洞证据和运行指标工作台。v1.6 引入“案例优先、技能晋升制”；v1.7 增加可持久化、可复算的运行遥测。
 
 > **v1.4** 从 [Shannon OSS](https://github.com/keygraph/shannon)（AI 白盒渗透测试引擎）迁移了 SSRF、命令注入、SSTI、JWT 攻击、授权攻击和 OOB 盲确认等攻击模式。所有工具为 Python 原创实现，设计思路源自 Shannon 的提示词架构。
 >
 > **v1.5** 新增代码驱动的技能遥测、确定性生命周期、durable review job、lease/retry worker 和持久化维护指令，形成最小完整自进化闭环。
 >
 > **v1.6** 新增案例记忆库、递归增量 RAG 索引和 `case_create`；DeepSeek curator 审查 agent-created Skill 的语义重复性；Skill 创建需要至少两条同类案例支持，避免“一题一 Skill”的知识库膨胀。
-> **v1.7.1** 新增服务端会话持久化：会话、运行历史和最终答复保存在 `telemetry.db`，刷新或重启服务后可恢复；旧浏览器会话会一次性导入，凭据会在入库前脱敏。
+> **v1.7.2** 新增大响应定向检索：`search_http_body` 和 `search_rendered_dom` 在受限同源响应中定位深层证据，只返回哈希、偏移量和有限上下文，不会将完整正文写入模型上下文。
 >
-> **v1.7.2（规划）** 将增加完整 HTTP 响应和渲染 DOM 的受限关键词/正则检索。它用于定位大页面深处的已知线索，不会把完整响应直接塞入模型上下文。
-
 ## 项目结构
 
 ```
@@ -30,8 +28,9 @@ my-agent/
 │   ├── evolution/              # 遥测、生命周期、DeepSeek curator、Nudge Job
 │   ├── session_db.py           # SQLite 持久化 (FTS5) ← v1.3
 │   ├── telemetry.py            # 运行、行动、模型 usage 与评测账本 ← v1.7
-│   ├── tools/                  # 扫描工具集（38 个工具）
+│   ├── tools/                  # 扫描工具集（41 个工具）
 │   │   ├── http_tools.py       #   http_get / http_post / http_request
+│   │   ├── targeted_search_tools.py # search_http_body / search_rendered_dom
 │   │   ├── analysis_tools.py   #   analyze_headers / extract_forms / extract_links
 │   │   ├── crawl_tools.py      #   crawl / sitemap / batch_scan
 │   │   ├── static_tools.py     #   analyze_js / decode_jwt / discover_api / render_page
@@ -160,7 +159,7 @@ python server/web_server.py
 
 ### 5. 扫描能力
 
-Agent 覆盖 10 大攻击类别，38 个工具自动协作：
+Agent 覆盖 10 大攻击类别，41 个工具自动协作：
 
 | 阶段 | 执行的操作 |
 |---|---|
@@ -182,7 +181,7 @@ Agent 覆盖 10 大攻击类别，38 个工具自动协作：
 |---|---|---|
 | `/api/chat` | WebSocket | 核心对话——逐 token 流式输出，提供 `scan_started`、`stage_started`、`stage_progress`、`tool_started`、`tool_finished`、`finding_created`、`scan_finished` 事件 |
 | `/api/config` | GET/PUT | 查看/修改模型、thinking 开关、`high/max` 强度、最大步骤和会话历史窗口 |
-| `/api/tools` | GET | 工具目录——返回 39 个工具按类别分组，含名称、描述、参数 Schema |
+| `/api/tools` | GET | 工具目录——返回 41 个工具按类别分组，含名称、描述、参数 Schema |
 | `/api/skills` | GET | 返回已学习 Skill 的生命周期状态、标签和使用遥测，供工具目录动态展示 |
 | `/api/evolution` | GET | 查看工具计数、review job、待处理指令和近期审查报告 |
 | `/api/metrics` | GET | 查看运行数、工具/协议失败率、首次有效行动比例、solve rate 与 token 用量 |
@@ -191,7 +190,7 @@ Agent 覆盖 10 大攻击类别，38 个工具自动协作：
 | `/api/sessions` | GET | 活跃连接数 |
 | `/api/health` | GET | 健康检查 |
 
-## 扫描工具（39 个）
+## 扫描工具（41 个）
 
 ### 🌐 HTTP 基础
 | 工具 | 说明 |
@@ -199,6 +198,8 @@ Agent 覆盖 10 大攻击类别，38 个工具自动协作：
 | `http_get(url)` | GET 请求，获取页面内容和响应头 |
 | `http_post(url, data)` | POST 请求，发送测试 payload |
 | `http_request(method, url, data, headers_json)` | 受约束的 GET/POST/PUT/PATCH/HEAD/OPTIONS |
+| `search_http_body(url, keyword_or_regex)` | 流式检索大文本响应，返回哈希、偏移量和有限上下文 |
+| `search_rendered_dom(url, keyword_or_regex)` | 在受限 Playwright 渲染文本中定向检索 |
 
 ### 🔍 攻击面测绘
 | 工具 | 说明 |
@@ -268,7 +269,7 @@ Agent 覆盖 10 大攻击类别，38 个工具自动协作：
 | `skill_restore(name)` | 恢复已归档技能 |
 | `scan_reflect(target, findings_summary, successful_techniques, failed_attempts)` | 扫描后反思：默认建议创建案例；重复验证后再建议晋升/更新 Skill |
 
-> `/api/tools` 暴露 **39 个基础工具**；RAG 初始化成功时，Agent 运行时还会动态加入 `search_knowledge`。工具目录会通过 `/api/skills` 显示已学习 Skill，不再把案例混入工具列表。
+> `/api/tools` 暴露 **41 个基础工具**；RAG 初始化成功时，Agent 运行时还会动态加入 `search_knowledge`。工具目录会通过 `/api/skills` 显示已学习 Skill，不再把案例混入工具列表。
 
 案例保存于 `agent/knowledge/cases/`，与 OWASP/CVE 文档一起由 Chroma + Qwen3 两阶段检索；案例包含前提、证据、解决链和失败路径，但不得包含 flag、凭据或 token。技能内容保存在 `agent/skills/`，可变遥测与生命周期状态保存在 `data/evolution.db`。业务工具每完成 10 次会持久化一个幂等 `skill_review` job；带 lease/retry 的 worker 自动审查结构化工具结果。DeepSeek curator 仅合并高置信重复的 agent-created Skill，且归档可恢复。`bundled`、已 pin 或被保护引用的技能不会被自动归档。
 
@@ -290,7 +291,7 @@ Agent 覆盖 10 大攻击类别，38 个工具自动协作：
 │   LangGraph Agent (推理面)    │  ← agent/agent.py
 │   • ChatOpenAI → DeepSeek    │
 │   • create_react_agent       │
-│   • 38 个 @tool 工具          │
+│   • 41 个 @tool 工具          │
 │                              │
 │   ┌──────────────────────┐   │
 │   │   RAG 知识库          │   │  ← agent/rag.py
@@ -383,7 +384,13 @@ Agent 覆盖 10 大攻击类别，38 个工具自动协作：
 - `skill_create` 强制要求至少两条同分类且标签重叠的独立案例，阻止单题经验污染 Skill 库
 - 新增 `/api/skills`，工具目录动态展示已学习 Skill；基础工具总数为 39
 
-### v1.7.1 — 服务端会话持久化（当前）
+### v1.7.2 — 大响应定向检索（当前）
+
+- `search_http_body` 在受限 HTTP 文本响应内流式检索，`search_rendered_dom` 在 Playwright 渲染文本内检索。
+- 输出包含 SHA-256、命中次数、偏移量和有限上下文；区分无命中、正文上限、响应截断、内容类型不支持和正则错误。
+- 当摘要不足但已有关键词或 flag 线索时，Agent 优先进行定向检索，而不把完整正文注入模型上下文。
+
+### v1.7.1 — 服务端会话持久化
 
 - `conversations` 与 `telemetry_runs.conversation_id` 将会话与运行遥测关联，支持创建、恢复、重命名和删除。
 - WebSocket 请求携带 `conversation_id`；用户输入、增量运行摘要和最终答复均可在服务重启后恢复。

@@ -40,11 +40,12 @@ def _redact(value: Any) -> Any:
         return value
     text = value
     for pattern in (
+        r"(?i)\b(?:[a-z0-9_-]*(?:ctf|flag)|flag)\{[^}\r\n]{1,512}\}",
         r"(?i)(bearer\s+)[^\s,;]+",
         r"(?i)((?:api[_-]?key|token|password|passwd|secret)\s*[=:]\s*)[^\s&;,]+",
         r"(?i)(cookie\s*[:=]\s*)[^\r\n]+",
     ):
-        text = re.sub(pattern, r"\1[REDACTED]", text)
+        text = re.sub(pattern, lambda match: f"{match.group(1)}[REDACTED]" if match.lastindex else "[REDACTED]", text)
     return text
 
 
@@ -167,7 +168,27 @@ class TelemetryStore:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_telemetry_runs_conversation ON telemetry_runs(conversation_id, started_at DESC)"
         )
+        self._redact_existing_records()
         self._conn.commit()
+
+    def _redact_existing_records(self) -> None:
+        """Upgrade previously persisted telemetry when redaction rules expand."""
+        for table, fields in {
+            "telemetry_runs": ("input_text", "target", "summary"),
+            "telemetry_actions": ("input_data", "output_excerpt", "result_data", "protocol_error"),
+            "telemetry_model_usage": ("raw_usage",),
+            "conversation_messages": ("content",),
+        }.items():
+            rows = self._conn.execute(f"SELECT rowid, {', '.join(fields)} FROM {table}").fetchall()
+            for row in rows:
+                updates = {field: _redact(row[field]) for field in fields if isinstance(row[field], str)}
+                changed = {field: value for field, value in updates.items() if value != row[field]}
+                if changed:
+                    assignments = ", ".join(f"{field}=?" for field in changed)
+                    self._conn.execute(
+                        f"UPDATE {table} SET {assignments} WHERE rowid=?",
+                        (*changed.values(), row["rowid"]),
+                    )
 
     def create_conversation(self, title: str = "新扫描", conversation_id: str | None = None) -> dict[str, Any]:
         conversation_id = conversation_id or str(uuid.uuid4())

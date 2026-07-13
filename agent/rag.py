@@ -11,6 +11,7 @@ RAG 知识库模块 — 两阶段检索管线 (v0.5.1)。
 """
 
 import os
+import hashlib
 import re
 from pathlib import Path
 
@@ -89,18 +90,24 @@ class RAGManager:
                     name=name,
                     embedding_function=self.embedding_fn,
                 )
-                # Check for new knowledge files that need indexing
-                existing = set(
-                    meta.get("source", "")
-                    for meta_list in self._collection.get(include=["metadatas"]).get("metadatas", [])
-                    for meta in [meta_list] if isinstance(meta, dict)
-                )
+                # Re-index new or changed files so redaction and corrections
+                # replace old vector chunks from the same source.
+                indexed = self._collection.get(include=["metadatas"]).get("metadatas", [])
+                existing_hashes = {
+                    str(meta.get("source", "")): str(meta.get("source_hash", ""))
+                    for meta in indexed if isinstance(meta, dict)
+                }
                 md_files = self._knowledge_files()
-                new_files = [f for f in md_files if self._source_name(f) not in existing]
-                if new_files:
-                    print(f"[RAG] 检测到新知识文件: {new_files}")
-                    self._index_documents(new_files)
-            except Exception:
+                changed_files = [
+                    path for path in md_files
+                    if existing_hashes.get(self._source_name(path)) != self._source_hash(path)
+                ]
+                if changed_files:
+                    print(f"[RAG] indexing {len(changed_files)} changed knowledge files")
+                    self._index_documents(changed_files)
+            except Exception as exc:
+                if "already exists" in str(exc).lower():
+                    raise
                 self._collection = self.client.create_collection(
                     name=name,
                     embedding_function=self.embedding_fn,
@@ -164,6 +171,10 @@ class RAGManager:
     def _source_name(self, path: Path) -> str:
         return path.relative_to(self.knowledge_dir).as_posix()
 
+    @staticmethod
+    def _source_hash(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
     def _index_documents(self, md_files: list[Path] | None = None):
         md_files = md_files if md_files is not None else self._knowledge_files()
         if not md_files:
@@ -177,6 +188,7 @@ class RAGManager:
                 continue
 
             source = self._source_name(md_file)
+            source_hash = self._source_hash(md_file)
             source_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", source)
             ids = [f"{source_id}:{i}" for i in range(len(chunks))]
             documents = [c["content"] for c in chunks]
@@ -186,14 +198,18 @@ class RAGManager:
                     "document_type": "case" if source.startswith("cases/") else "reference",
                     "title": c["title"],
                     "char_count": len(c["content"]),
+                    "source_hash": source_hash,
                 }
                 for c in chunks
             ]
 
+            # Existing chunks share the source metadata and must be removed
+            # before re-adding a changed case with the same deterministic ids.
+            self._collection.delete(where={"source": source})
             self._collection.add(ids=ids, documents=documents, metadatas=metadatas)
             chunks_added += len(chunks)
 
-        print(f"[RAG] ✅ 已索引 {len(md_files)} 个知识文件 → {chunks_added} 个向量块")
+        print(f"[RAG] indexed {len(md_files)} knowledge files -> {chunks_added} chunks")
 
     @staticmethod
     def _chunk_markdown(filepath: Path) -> list[dict]:
