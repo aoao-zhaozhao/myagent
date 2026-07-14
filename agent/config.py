@@ -22,6 +22,13 @@ def _env_optional_float(name: str) -> float | None:
     return float(value)
 
 
+def _env_int_at_least_one(name: str, default: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    if value < 1:
+        raise ValueError(f"{name} must be at least 1")
+    return value
+
+
 @dataclass
 class AgentConfig:
     """Web 漏洞审查 Agent 配置"""
@@ -44,6 +51,12 @@ class AgentConfig:
     thinking_enabled: bool = field(default_factory=lambda: _env_bool("DEEPSEEK_THINKING_ENABLED", True))
     reasoning_effort: str = field(default_factory=lambda: os.getenv("DEEPSEEK_REASONING_EFFORT", "high"))
     show_reasoning: bool = field(default_factory=lambda: _env_bool("DEEPSEEK_SHOW_REASONING", True))
+    tool_selection_enabled: bool = field(
+        default_factory=lambda: _env_bool("AGENT_TOOL_SELECTION_ENABLED", True)
+    )
+    tool_selection_max_tools: int = field(
+        default_factory=lambda: _env_int_at_least_one("AGENT_TOOL_SELECTION_MAX_TOOLS", 12)
+    )
 
     # Skill evolution runtime
     skill_nudge_interval: int = field(

@@ -19,6 +19,8 @@ from .telemetry import TelemetryStore
 from .tools import BASE_TOOLS
 from .tools.results import parse_tool_result, tool_result_protocol_error
 from .tools.auth_session_tools import reset_auth_session_mode, set_auth_session_mode
+from .tool_selection import select_tools
+from .tool_access import ToolAccessBroker
 from .case_evidence import begin_case_evidence_gate, end_case_evidence_gate, record_verified_evidence
 
 
@@ -116,7 +118,7 @@ class Agent:
         set_proxy(None)
         self._traffic_capture = None
 
-    def _tools(self):
+    def _tools(self, user_input: str = ""):
         tools = list(BASE_TOOLS)
         if self._search_knowledge_tool:
             tools.append(self._search_knowledge_tool)
@@ -141,7 +143,19 @@ class Agent:
                     tools.append(adapted)
             except Exception as exc:
                 print(f"[Agent] MCP 工具注入失败: {exc}")
-        return tools
+        if not self.config.tool_selection_enabled:
+            return tools
+        selected = select_tools(
+            tools,
+            user_input,
+            max_tools=self.config.tool_selection_max_tools,
+        ).tools
+        self._tool_access_broker = ToolAccessBroker(
+            tools,
+            selected,
+            domain_limit=self.config.tool_selection_max_tools,
+        )
+        return selected + self._tool_access_broker.control_tools()
 
     def _build_llm(self) -> ChatOpenAI:
         """Build a fresh client so runtime model settings apply to the next scan."""
@@ -349,7 +363,7 @@ class Agent:
                 *invocation_messages[1:],
             ]
         self.llm = self._build_llm()
-        self.agent = create_react_agent(self.llm, self._tools())
+        self.agent = create_react_agent(self.llm, self._tools(user_input))
 
         full_response: list[str] = []
         model_call_started: dict[str, float] = {}

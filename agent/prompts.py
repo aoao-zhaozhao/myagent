@@ -213,3 +213,14 @@ path is verified and search the verified session response instead.
 """
 
 SYSTEM_PROMPT += JWT_SESSION_POLICY
+
+TOOL_LOADING_POLICY = """
+## Tool loading policy
+
+The initial tool list is intentionally small. If the next required capability is
+not visible, call load_tool_domain with the relevant domain, inspect its returned
+catalogue, then call call_loaded_tool using one returned name and its arguments.
+Never invent a tool name or use call_loaded_tool before loading its domain.
+"""
+
+SYSTEM_PROMPT += TOOL_LOADING_POLICY

@@ -1,4 +1,4 @@
-"""FastAPI server for WebSec Research Agent v1.7.4."""
+"""FastAPI server for WebSec Research Agent v1.8.1."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from agent.telemetry import TelemetryStore
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-APP_VERSION = "1.7.5"
+APP_VERSION = "1.8.1"
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):

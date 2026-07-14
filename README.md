@@ -1,5 +1,7 @@
 # WebSec Research Agent — Web 漏洞审查引擎
 
+> **v1.8.1** 工具路由与渐进式加载：每轮只向模型注入当前任务相关的首轮工具集（默认上限 12 个），其余工具保留在服务端。模型需要 JWT、注入、浏览器、流量或知识库等长尾能力时，可加载对应领域的紧凑目录，再通过受白名单约束的执行器调用已加载工具。可用 `AGENT_TOOL_SELECTION_ENABLED=false` 回退为全量注入，并通过 `AGENT_TOOL_SELECTION_MAX_TOOLS` 调整首轮预算。
+
 基于 DeepSeek + LangGraph 的 Web 应用安全扫描 Agent。覆盖 **SQLi / XSS / 命令注入 / SSTI / LFI / SSRF / JWT 攻击 / IDOR / 提权 / OOB 外带确认** 共 10 大攻击类别，50 个注册工具，80+ 内置 payload。通过 FastAPI + WebSocket 提供可观察的扫描阶段、实时工具轨迹、漏洞证据和运行指标工作台。v1.6 引入”案例优先、技能晋升制”；v1.7 增加可持久化、可复算的运行遥测；v1.8 新增 MCP 可插拔工具链和 mitmproxy 流量证据存储。
 
 > **v1.8.0** 新增 MCP 可插拔工具链与流量证据存储：参照 [VulnClaw](https://github.com/Unclecheng-li/VulnClaw) 的架构设计，引入 MCP 服务注册中心、生命周期管理器、渐进降级与自动重启，开箱支持 fetch/memory 本地服务和 chrome-devtools / Burp Suite 外部 MCP 连接。新增基于 mitmproxy 的免费代理捕获层（Tier-A 后端），所有 HTTP 流量归一化为 `CapturedExchange` 并以追加式 JSONL 索引 + 原始报文落盘；Agent 可通过 `traffic_list` / `traffic_view` / `traffic_repeat` / `traffic_sitemap` 四个工具查询、分析和重放已捕获的流量，漏洞报告可直接引用 `request_id` 作为证据。
@@ -112,11 +114,16 @@ TELEMETRY_DB_PATH=data/telemetry.db
 # 可选：配置后 /api/metrics 才计算成本（单位：USD / 1M tokens）
 MODEL_INPUT_COST_PER_MILLION=
 MODEL_OUTPUT_COST_PER_MILLION=
+# Per-turn tool schemas: keep a small first-round set, then load domains on demand.
+AGENT_TOOL_SELECTION_ENABLED=true
+AGENT_TOOL_SELECTION_MAX_TOOLS=12
 ```
 
 `deepseek-v4-flash` 用于默认扫描；在"模型与思考"设置中可切换到 `deepseek-v4-pro`。思考模式显式传递 `thinking.enabled` 和 `reasoning_effort`（`high` / `max`），运行时不会传递与思考模式不兼容的 `temperature`。模型、思考开关和强度会在下一次扫描生效。
 
 每次扫描最多执行 `AGENT_MAX_TURNS` 个 LangGraph 步骤（默认 120，配置接口允许 10-240）；会话上下文保留系统提示和最近 `AGENT_HISTORY_MESSAGES` 条已完成消息（默认 24），避免长会话无限增长并导致模型上下文耗尽。
+
+工具选择默认只向模型提供当前请求最相关的工具；当扫描中需要长尾能力时，Agent 会加载对应领域的目录并按需调用，不会重新注入全量 Schema。将 `AGENT_TOOL_SELECTION_ENABLED=false` 可回退为旧的全量工具注入；`AGENT_TOOL_SELECTION_MAX_TOOLS` 控制首轮具体工具数量（默认 12）。
 
 ### 2. 安装依赖
 
@@ -377,6 +384,13 @@ evidence/traffic/
 
 ## 版本演进
 
+### v1.8.1 — 工具路由与渐进式加载
+
+- 首轮只向模型注入与当前请求相关的工具，默认上限为 12 个，减少重复工具 Schema 的输入 token。
+- `load_tool_domain` 按领域提供紧凑工具目录；`call_loaded_tool` 仅允许调用首轮已加载或目录明确返回的工具。
+- 支持 authentication、JWT、injection、browser、SSRF、authorization、OOB、traffic、skills 与 knowledge 等能力域；可通过环境变量关闭路由并恢复旧的全量注入。
+- 当前 47 个基础工具的定义载荷实测为 49,519 字符；泛扫描首轮使用 12 个具体工具和 2 个轻量控制工具时为 12,021 字符，减少约 75.7%。长尾工具只在按需加载后才进入后续模型上下文。
+
 ### v0.1 — 基础框架
 手写 ReAct 循环，支持 DeepSeek 调用 + 2 个工具。
 
@@ -451,7 +465,7 @@ evidence/traffic/
 - `skill_create` 强制要求至少两条同分类且标签重叠的独立案例，阻止单题经验污染 Skill 库
 - 新增 `/api/skills`，工具目录动态展示已学习 Skill；基础工具总数为 39
 
-### v1.7.5 — 用量统计页（当前）
+### v1.7.5 — 用量统计页
 
 - 新增 `/api/usage-stats`：按全部时间、近 7 天或近 30 天聚合 `telemetry_runs` 与 `telemetry_model_usage`。
 - 工作台新增概览和模型视图：年度活跃热力图、活跃天数、连续活跃、最长运行、常用模型、逐日 token 趋势及模型输入/输出/缓存明细。
